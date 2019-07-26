@@ -145,6 +145,7 @@ module riscv_ex_stage
   input logic                            apu_master_valid_i,
   input logic [31:0]                     apu_master_result_i,
 
+ 
   input logic                            lsu_en_i,
   input logic [31:0]                     lsu_rdata_i,
   input logic                            data_rvalid_ex_i,
@@ -152,6 +153,18 @@ module riscv_ex_stage
   // input from ID stage
   input logic                            branch_in_ex_i,
   input logic [5:0]                      regfile_alu_waddr_i,
+  input logic                            regfile_alu_we_i,
+  input logic                            lsu_en_i,
+  input logic [31:0]                     lsu_rdata_i,
+  input logic                            lsu_tospr_ex_i,
+
+  // RNN Extension
+  output logic                           computeLoadVLIW_ex_o,
+
+  // input from ID stage
+  input logic                            branch_in_ex_i,
+  input logic [5:0]                      regfile_alu_waddr_i,
+  input logic [5:0]                      regfile_alu_waddr2_i,
   input logic                            regfile_alu_we_i,
 
   // directly passed through to WB stage, not used in EX
@@ -217,6 +230,16 @@ module riscv_ex_stage
   logic           apu_ready;
   logic           apu_gnt;
 
+  // RNN Extensions
+  logic           spr_rnn_en;
+  logic [31:0]    spr_rnn, spr_rnn_n;
+  logic           lsu_tospr_wb;
+  logic [5:0]     regfile_alu_waddr2_wb;
+  logic [31:0]    mult_dot_op_a;
+  logic           loadComputeVLIW;
+
+  assign loadComputeVLIW = alu_en_i & mult_en_i;
+  assign computeLoadVLIW_ex_o = loadComputeVLIW;
   // ALU write port mux
   always_comb
   begin
@@ -237,6 +260,10 @@ module riscv_ex_stage
     end else begin
       regfile_alu_we_fw_o      = regfile_alu_we_i & ~apu_en_i; // private fpu incomplete?
       regfile_alu_waddr_fw_o   = regfile_alu_waddr_i;
+     
+      if (mult_en_i) 
+        regfile_alu_wdata_fw_o = mult_result;
+
       if (alu_en_i)
         regfile_alu_wdata_fw_o = alu_result;
       if (mult_en_i)
@@ -245,12 +272,16 @@ module riscv_ex_stage
         regfile_alu_wdata_fw_o = qnt_result;
       if (csr_access_i)
         regfile_alu_wdata_fw_o = csr_rdata_i;
+
+      if(lsu_tospr_ex_i)
+        regfile_alu_waddr_fw_o   = regfile_alu_waddr2_i;
     end
   end
 
   // LSU write port mux
   always_comb
   begin
+    spr_rnn_en = 1'b0;
     regfile_we_wb_o    = 1'b0;
     regfile_waddr_wb_o = regfile_waddr_lsu;
     regfile_wdata_wb_o = lsu_rdata_i;
@@ -261,13 +292,26 @@ module riscv_ex_stage
       if (apu_valid & (!apu_singlecycle & !apu_multicycle)) begin
          wb_contention_lsu = 1'b1;
 //         $error("%t, wb-contention", $time);
+      // APU two-cycle operations are written back on LSU port
+      end else if (apu_valid & (!apu_singlecycle & !apu_multicycle)) begin
+          regfile_we_wb_o    = 1'b1;
+          regfile_waddr_wb_o = apu_waddr;
+          regfile_wdata_wb_o = apu_result;
       end
-    // APU two-cycle operations are written back on LSU port
-    end else if (apu_valid & (!apu_singlecycle & !apu_multicycle)) begin
-      regfile_we_wb_o    = 1'b1;
-      regfile_waddr_wb_o = apu_waddr;
-      regfile_wdata_wb_o = apu_result;
+      if(lsu_tospr_wb) begin// does not work because of latency
+          spr_rnn_en = 1'b1;       //spr instead of gpr
+          regfile_we_wb_o = 1'b0;  //spr instead of gpr
+          regfile_waddr_wb_o = regfile_alu_waddr2_wb;
+      end
     end
+    if(loadComputeVLIW) begin // todo check that regfile_we_lsu is not also high!
+      regfile_we_wb_o    = 1'b1;
+      regfile_waddr_wb_o = regfile_waddr_i;
+      regfile_wdata_wb_o = mult_result;
+    end
+
+  
+
   end
 
   // branch handling
@@ -325,6 +369,10 @@ module riscv_ex_stage
   //                                                            //
   ////////////////////////////////////////////////////////////////
 
+
+  assign mult_dot_op_a = (loadComputeVLIW) ? spr_rnn_n : mult_dot_op_a_i;
+
+
   riscv_mult
   #(
     .SHARED_DSP_MULT(SHARED_DSP_MULT)
@@ -345,6 +393,7 @@ module riscv_ex_stage
     .op_c_i          ( mult_operand_c_i     ),
     .imm_i           ( mult_imm_i           ),
 
+   
     .dot_op_h_a_i      ( mult_dot_op_h_a_i      ),
     .dot_op_h_b_i      ( mult_dot_op_h_b_i      ),
     .dot_op_b_a_i      ( mult_dot_op_b_a_i      ),
@@ -353,6 +402,7 @@ module riscv_ex_stage
     .dot_op_n_b_i      ( mult_dot_op_n_b_i      ),
     .dot_op_c_a_i      ( mult_dot_op_c_a_i      ),
     .dot_op_c_b_i      ( mult_dot_op_c_b_i      ),
+   
     .dot_op_c_i      ( mult_dot_op_c_i      ),
     .dot_signed_i    ( mult_dot_signed_i    ),
     .is_clpx_i       ( mult_is_clpx_i       ),
@@ -599,6 +649,22 @@ generate
 
    assign apu_busy_o = apu_active;
 
+  // SPR
+  assign spr_rnn_n = spr_rnn_en ? lsu_rdata_i : spr_rnn;
+always_ff @(posedge clk, negedge rst_n)
+  begin : SPR
+    if (~rst_n)
+    begin
+      spr_rnn   <= '0;
+    end
+    else
+    begin
+        spr_rnn <= spr_rnn_n;
+    end
+  end
+
+
+
   ///////////////////////////////////////
   // EX/WB Pipeline Register           //
   ///////////////////////////////////////
@@ -608,12 +674,16 @@ generate
     begin
       regfile_waddr_lsu   <= '0;
       regfile_we_lsu      <= 1'b0;
+      lsu_tospr_wb        <= 1'b0;
+      regfile_alu_waddr2_wb <= 'b0;
     end
     else
     begin
       if (ex_valid_o) // wb_ready_i is implied
       begin
         regfile_we_lsu    <= regfile_we_i & ~lsu_err_i;
+        lsu_tospr_wb <= lsu_tospr_ex_i;
+        regfile_alu_waddr2_wb <= regfile_alu_waddr2_i;
         if (regfile_we_i & ~lsu_err_i ) begin
           regfile_waddr_lsu <= regfile_waddr_i;
         end
