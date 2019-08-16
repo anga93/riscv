@@ -151,6 +151,7 @@ module riscv_core
   logic              trap_addr_mux;
   logic              lsu_load_err;
   logic              lsu_store_err;
+  logic [1:0]        lsu_tospr_ex;
 
   // ID performance counter signals
   logic        is_decoding;
@@ -752,7 +753,7 @@ module riscv_core
 
     .lsu_tospr_ex_o               (lsu_tospr_ex          ),
     .loadComputeVLIW_ex_i         (loadComputeVLIW_ex    ),
-    
+
     // Interrupt Signals
     .irq_i                        ( irq_i                ), // incoming interrupts
     .irq_sec_i                    ( (PULP_SECURE) ? irq_sec_i : 1'b0 ),
@@ -902,11 +903,12 @@ module riscv_core
     // response channel
     .apu_master_valid_i         ( apu_master_valid_i           ),
     .apu_master_result_i        ( apu_master_result_i          ),
-
-   .lsu_en_i                   ( data_req_qnt_ex              ),
-   .lsu_rdata_i                ( lsu_rdata                    ),
+   
    .data_rvalid_ex_i              ( data_rvalid_i               ),
-   .lsu_tospr_ex_i                ( lsu_tospr_ex                 ),
+    .lsu_en_i                   ( data_req_ex                  ),
+    .lsu_rdata_i                ( lsu_rdata                    ),
+    .lsu_tospr_ex_i             ( lsu_tospr_ex                 ),
+
 
     // interface with CSRs
     .csr_access_i               ( csr_access_ex                ),
