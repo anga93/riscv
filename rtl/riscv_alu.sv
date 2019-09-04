@@ -117,12 +117,12 @@ module riscv_alu
   // generate
   // if(RNN_EXTENSIONS == 1'b1)
   // TODO check
-  `ifdef RNN_EXTENSION
-    assign adder_op_b = (operator_i == ALU_ADD4) ? 'h4 : (adder_op_b_negate ? operand_b_neg : operand_b_i);
-  `else
+//  `ifdef RNN_EXTENSION
+    assign adder_op_b = (operator_i == ALU_ADD4) ? 'h4 : (adder_op_b_negate ? ( is_subrot_i ? ~{operand_a_i[15:0], operand_b_i[31:16]} : operand_b_neg ) : operand_b_i);
+//  `else
   // else 
-    assign adder_op_b = adder_op_b_negate ? ( is_subrot_i ? ~{operand_a_i[15:0], operand_b_i[31:16]} : operand_b_neg ) : operand_b_i;
-  `endif
+//    assign adder_op_b = adder_op_b_negate ? operand_b_neg : operand_b_i;
+//  `endif
   // prepare carry
   always_comb
   begin

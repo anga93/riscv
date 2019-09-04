@@ -145,6 +145,7 @@ module riscv_ex_stage
   input logic                            apu_master_valid_i,
   input logic [31:0]                     apu_master_result_i,
 
+
   input logic                            lsu_en_i,
   input logic [31:0]                     lsu_rdata_i,
   input logic [1:0]                      lsu_tospr_ex_i,
@@ -191,7 +192,9 @@ module riscv_ex_stage
 
   logic [31:0]    alu_result;
   logic [31:0]    mult_result;
-  logic [31:0]   qnt_result;
+  logic [31:0]    qnt_result;
+  logic [31:0]    mult_result_p;
+  logic [31:0]    mult_result_n;
   logic           alu_cmp_result;
 
   logic           regfile_we_lsu;
@@ -223,7 +226,7 @@ module riscv_ex_stage
 
   // RNN Extensions
   logic           spr_rnn_en;
-  logic [31:0]    spr_rnn[0:1], spr_rnn_n[0:1];
+  logic [1:0][31:0] spr_rnn, spr_rnn_n;
   logic [1:0]     lsu_tospr_wb;
   logic [5:0]     regfile_alu_waddr2_wb;
   logic [31:0]    mult_dot_op_a;
@@ -269,6 +272,7 @@ module riscv_ex_stage
     end
   end
 
+  assign mult_result_n = mult_result; //loadComputeVLIW ? mult_result : mult_result_p;
   // LSU write port mux
   always_comb
   begin
@@ -291,14 +295,14 @@ module riscv_ex_stage
       end
       if(lsu_tospr_wb[0]) begin// does not work because of latency
           spr_rnn_en = 1'b1;       //spr instead of gpr
-          regfile_we_wb_o = 1'b0;  //spr instead of gpr
-          regfile_waddr_wb_o = regfile_alu_waddr2_wb;
+          // regfile_we_wb_o = 1'b0;  //spr instead of gpr
+          // regfile_waddr_wb_o = regfile_alu_waddr2_wb;
       end
     end
-    if(loadComputeVLIW) begin // todo check that regfile_we_lsu is not also high!
+    if(lsu_tospr_wb[0]) begin 
       regfile_we_wb_o    = 1'b1;
-      regfile_waddr_wb_o = regfile_waddr_i;
-      regfile_wdata_wb_o = mult_result;
+      regfile_waddr_wb_o = regfile_waddr_lsu;
+      regfile_wdata_wb_o = mult_result_p;
     end
 
   
@@ -641,19 +645,20 @@ generate
    assign apu_busy_o = apu_active;
 
   // SPR
-  assign spr_rnn_n[0] = (spr_rnn_en && lsu_tospr_wb[1] == 1'b0) ? lsu_rdata_i : spr_rnn[0];
-  assign spr_rnn_n[1] = (spr_rnn_en && lsu_tospr_wb[1] == 1'b1) ? lsu_rdata_i : spr_rnn[1];
+  assign spr_rnn_n[0] = (spr_rnn_en && lsu_tospr_wb[1]==1'b0) ? lsu_rdata_i : spr_rnn[0];
+  assign spr_rnn_n[1] = (spr_rnn_en && lsu_tospr_wb[1]==1'b1) ? lsu_rdata_i : spr_rnn[1];
+
 always_ff @(posedge clk, negedge rst_n)
   begin : SPR
     if (~rst_n)
     begin
-      spr_rnn[0]   <= '0;
-      spr_rnn[1]   <= '0;
+      spr_rnn   <= '0;
+      mult_result_p <= '0;
     end
     else
     begin
-        spr_rnn[0] <= spr_rnn_n[0];
-        spr_rnn[1] <= spr_rnn_n[1];
+        spr_rnn       <= spr_rnn_n;
+        mult_result_p <= mult_result_n;
     end
   end
 
