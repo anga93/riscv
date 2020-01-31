@@ -47,103 +47,112 @@ module riscv_cs_registers
 )
 (
   // Clock and Reset
-  input  logic            clk,
-  input  logic            rst_n,
+  input logic                             clk,
+  input logic                             rst_n,
 
   // Core and Cluster ID
-  input  logic  [3:0]     core_id_i,
-  input  logic  [5:0]     cluster_id_i,
-  output logic [23:0]     mtvec_o,
-  output logic [23:0]     utvec_o,
+  input logic [3:0]                       core_id_i,
+  input logic [5:0]                       cluster_id_i,
+  output logic [23:0]                     mtvec_o,
+  output logic [23:0]                     utvec_o,
 
   // Used for boot address
-  input  logic [30:0]     boot_addr_i,
+  input logic [30:0]                      boot_addr_i,
 
   // Interface to registers (SRAM like)
-  input  logic            csr_access_i,
-  input  logic [11:0]     csr_addr_i,
-  input  logic [31:0]     csr_wdata_i,
-  input  logic  [1:0]     csr_op_i,
-  output logic [31:0]     csr_rdata_o,
+  input logic                             csr_access_i,
+  input logic [11:0]                      csr_addr_i,
+  input logic [31:0]                      csr_wdata_i,
+  input logic [1:0]                       csr_op_i,
+  output logic [31:0]                     csr_rdata_o,
 
-  output logic [2:0]         frm_o,
-  output logic [C_PC-1:0]    fprec_o,
-  input  logic [C_FFLAG-1:0] fflags_i,
-  input  logic               fflags_we_i,
+`ifdef STATUS_BASED
+  output logic [C_FPNEW_FMTBITS-1:0]      fpu_dst_fmt_o, //aggiunta sb fpu
+  output logic [C_FPNEW_FMTBITS-1:0]      fpu_src_fmt_o, //aggiunta sb fpu
+  output logic [C_FPNEW_IFMTBITS-1:0]     fpu_ifmt_o, //aggiunta sb fpu
+  output ivec_mode_fmt                    ivec_fmt_o, //added for sb ivec : for now it's 2 bits(only int16 and int8)but it will need to be adjusted
+  output logic [NBITS_MIXED_CYCLES-1:0]   ivec_mixed_cycle_o, //added for sb ivec : output of counter of number of cycles for mixed precision operations
+  output logic [NBITS_MAX_KER-1:0]        ivec_skip_size_o, //added for sb ivec : used by mpc to know when to increase next cycle
+`endif
+
+  output logic [2:0]                      frm_o,
+  output logic [C_PC-1:0]                 fprec_o,
+  input logic [C_FFLAG-1:0]               fflags_i,
+  input logic                             fflags_we_i,
 
   // Interrupts
-  output logic            m_irq_enable_o,
-  output logic            u_irq_enable_o,
+  output logic                            m_irq_enable_o,
+  output logic                            u_irq_enable_o,
 
   //csr_irq_sec_i is always 0 if PULP_SECURE is zero
-  input  logic            csr_irq_sec_i,
-  output logic            sec_lvl_o,
-  output logic [31:0]     mepc_o,
-  output logic [31:0]     uepc_o,
+  input logic                             csr_irq_sec_i,
+  output logic                            sec_lvl_o,
+  output logic [31:0]                     mepc_o,
+  output logic [31:0]                     uepc_o,
 
   // debug
-  input  logic            debug_mode_i,
-  input  logic  [2:0]     debug_cause_i,
-  input  logic            debug_csr_save_i,
-  output logic [31:0]     depc_o,
-  output logic            debug_single_step_o,
-  output logic            debug_ebreakm_o,
-  output logic            debug_ebreaku_o,
+  input logic                             debug_mode_i,
+  input logic [2:0]                       debug_cause_i,
+  input logic                             debug_csr_save_i,
+  output logic [31:0]                     depc_o,
+  output logic                            debug_single_step_o,
+  output logic                            debug_ebreakm_o,
+  output logic                            debug_ebreaku_o,
 
 
-  output logic  [N_PMP_ENTRIES-1:0] [31:0] pmp_addr_o,
-  output logic  [N_PMP_ENTRIES-1:0] [7:0]  pmp_cfg_o,
+  output logic [N_PMP_ENTRIES-1:0] [31:0] pmp_addr_o,
+  output logic [N_PMP_ENTRIES-1:0] [7:0]  pmp_cfg_o,
 
-  output PrivLvl_t        priv_lvl_o,
+  output                                  PrivLvl_t priv_lvl_o,
 
-  input  logic [31:0]     pc_if_i,
-  input  logic [31:0]     pc_id_i,
-  input  logic [31:0]     pc_ex_i,
+  input logic [31:0]                      pc_if_i,
+  input logic [31:0]                      pc_id_i,
+  input logic [31:0]                      pc_ex_i,
 
-  input  logic            csr_save_if_i,
-  input  logic            csr_save_id_i,
-  input  logic            csr_save_ex_i,
+  input logic                             csr_save_if_i,
+  input logic                             csr_save_id_i,
+  input logic                             csr_save_ex_i,
 
-  input  logic            csr_restore_mret_i,
-  input  logic            csr_restore_uret_i,
+  input logic                             csr_restore_mret_i,
+  input logic                             csr_restore_uret_i,
 
-  input  logic            csr_restore_dret_i,
+  input logic                             csr_restore_dret_i,
   //coming from controller
-  input  logic [5:0]      csr_cause_i,
+  input logic [5:0]                       csr_cause_i,
   //coming from controller
-  input  logic            csr_save_cause_i,
+  input logic                             csr_save_cause_i,
   // Hardware loops
-  input  logic [N_HWLP-1:0] [31:0] hwlp_start_i,
-  input  logic [N_HWLP-1:0] [31:0] hwlp_end_i,
-  input  logic [N_HWLP-1:0] [31:0] hwlp_cnt_i,
+  input logic [N_HWLP-1:0] [31:0]         hwlp_start_i,
+  input logic [N_HWLP-1:0] [31:0]         hwlp_end_i,
+  input logic [N_HWLP-1:0] [31:0]         hwlp_cnt_i,
 
-  output logic [31:0]              hwlp_data_o,
-  output logic [N_HWLP_BITS-1:0]   hwlp_regid_o,
-  output logic [2:0]               hwlp_we_o,
+  output logic [31:0]                     hwlp_data_o,
+  output logic [N_HWLP_BITS-1:0]          hwlp_regid_o,
+  output logic [2:0]                      hwlp_we_o,
 
   // Performance Counters
-  input  logic                 id_valid_i,        // ID stage is done
-  input  logic                 is_compressed_i,   // compressed instruction in ID
-  input  logic                 is_decoding_i,     // controller is in DECODE state
+  input logic                             id_valid_i, // ID stage is done
+  input logic                             is_compressed_i, // compressed instruction in ID
+  input logic                             is_decoding_i, // controller is in DECODE state
 
-  input  logic                 imiss_i,           // instruction fetch
-  input  logic                 pc_set_i,          // pc was set to a new value
-  input  logic                 jump_i,            // jump instruction seen   (j, jr, jal, jalr)
-  input  logic                 branch_i,          // branch instruction seen (bf, bnf)
-  input  logic                 branch_taken_i,    // branch was taken
-  input  logic                 ld_stall_i,        // load use hazard
-  input  logic                 jr_stall_i,        // jump register use hazard
-  input  logic                 pipeline_stall_i,  // extra cycles from elw
+  input logic                             imiss_i, // instruction fetch
+  input logic                             pc_set_i, // pc was set to a new value
+  input logic                             jump_i, // jump instruction seen   (j, jr, jal, jalr)
+  input logic                             branch_i, // branch instruction seen (bf, bnf)
+  input logic                             branch_taken_i, // branch was taken
+  input logic                             ld_stall_i, // load use hazard
+  input logic                             jr_stall_i, // jump register use hazard
+  input logic                             pipeline_stall_i, // extra cycles from elw
 
-  input  logic                 apu_typeconflict_i,
-  input  logic                 apu_contention_i,
-  input  logic                 apu_dep_i,
-  input  logic                 apu_wb_i,
+  input logic                             apu_typeconflict_i,
+  input logic                             apu_contention_i,
+  input logic                             apu_dep_i,
+  input logic                             apu_wb_i,
 
-  input  logic                 mem_load_i,        // load from memory in this cycle
-  input  logic                 mem_store_i,       // store to memory in this cycle
+  input logic                             mem_load_i, // load from memory in this cycle
+  input logic                             mem_store_i, // store to memory in this cycle
 
-  input  logic [N_EXT_CNT-1:0] ext_counters_i
+  input logic [N_EXT_CNT-1:0]             ext_counters_i
 );
 
   localparam N_APU_CNT       = (APU==1) ? 4 : 0;
@@ -245,7 +254,14 @@ module riscv_cs_registers
   logic [C_RM-1:0]     frm_q, frm_n;
   logic [C_FFLAG-1:0]  fflags_q, fflags_n;
   logic [C_PC-1:0]     fprec_q, fprec_n;
+`ifdef STATUS_BASED
+   logic [C_FPNEW_FMTBITS-1:0]           fpu_dst_fmt_q, fpu_dst_fmt_n, fpu_src_fmt_q, fpu_src_fmt_n; //aggiunta fpu_status_based
+   logic [C_FPNEW_IFMTBITS-1:0]          fpu_ifmt_q, fpu_ifmt_n; //aggiunta sb fpu
+   ivec_mode_fmt                         ivec_fmt_q, ivec_fmt_n; //Added for sb ivec : needed for csr update logic
+   logic [NBITS_MIXED_CYCLES-1:0]        ivec_mixed_cycle_q, ivec_mixed_cycle_n; //Added for sb ivec: counters for mixed precision operation
+   logic [NBITS_MAX_KER-1 : 0]           ivec_skip_size_q, ivec_skip_size_n; //added for sb ivec
 
+`endif
   // Interrupt control signals
   logic [31:0] mepc_q, mepc_n;
   logic [31:0] uepc_q, uepc_n;
@@ -312,6 +328,31 @@ if(PULP_SECURE==1) begin
       12'h002: csr_rdata_int = (FPU == 1) ? {29'b0, frm_q}           : '0;
       12'h003: csr_rdata_int = (FPU == 1) ? {24'b0, frm_q, fflags_q} : '0;
       12'h006: csr_rdata_int = (FPU == 1) ? {27'b0, fprec_q}         : '0; // Optional precision control for FP DIV/SQRT Unit
+`ifdef STATUS_BASED
+      /********************* Aggiunta sb fpu : I vari registri per selezionare i formati ****************************/
+      /* 0x007 : Seleziona solo fpu_fmt_dst                                                                         */
+      /* 0x008 : Seleziona solo fpu_fmt_src (per fare casting)                                                      */
+      /* 0x009 : Seleziona solo fpu_ifmt (per fare casting)                                                         */
+      /* 0x00a : Per fare casting da FP -> FP, permette di scivere il source e destination in una scittura sola     */
+      /* 0x00b : Per fare casting da FP -> INT, permette di scrivere in un unica scrittura fpu_fmt_dst e fpu_ifmt   */
+      /* 0x00c : Per fare casting da INT -> FP, permette di scrivere in un unica scrittura fpu_fmt_src e fpu_ifmt   */
+      /**************************************************************************************************************/
+      12'h007: csr_rdata_int = (FPU == 1) ? {                    {(32-C_FPNEW_FMTBITS){1'b0}}, fpu_dst_fmt_q}                : '0;
+      12'h008: csr_rdata_int = (FPU == 1) ? {                    {(32-C_FPNEW_FMTBITS){1'b0}}, fpu_src_fmt_q}                : '0;
+      12'h009: csr_rdata_int = (FPU == 1) ? {                   {(32-C_FPNEW_IFMTBITS){1'b0}},    fpu_ifmt_q}                : '0;
+      12'h00a: csr_rdata_int = (FPU == 1) ? {                  {(32-2*C_FPNEW_FMTBITS){1'b0}}, fpu_src_fmt_q, fpu_dst_fmt_q} : '0;
+      12'h00b: csr_rdata_int = (FPU == 1) ? { {(32-(C_FPNEW_IFMTBITS+C_FPNEW_FMTBITS)){1'b0}},    fpu_ifmt_q, fpu_src_fmt_q} : '0;
+      12'h00c: csr_rdata_int = (FPU == 1) ? { {(32-(C_FPNEW_IFMTBITS+C_FPNEW_FMTBITS)){1'b0}},    fpu_ifmt_q, fpu_dst_fmt_q} : '0;
+
+      /************************* Added for sb ivec : new register for format selection ***************************
+       * 0x00d : Select the format for ivec instructions                                                         *
+       * 0x00e : Counter of the current mixed precision operation                                                *
+       ***********************************************************************************************************/
+      12'h00d: csr_rdata_int = {      {(32-IVEC_FMT_BITS){1'b0}},         ivec_fmt_q};
+      12'h00e: csr_rdata_int = { {(32-NBITS_MIXED_CYCLES){1'b0}}, ivec_mixed_cycle_q};      
+      12'h00f: csr_rdata_int = {      {(32-NBITS_MAX_KER){1'b0}},   ivec_skip_size_q};            
+
+`endif	
       // mstatus
       12'h300: csr_rdata_int = {
                                   14'b0,
@@ -398,6 +439,30 @@ end else begin //PULP_SECURE == 0
       12'h002: csr_rdata_int = (FPU == 1) ? {29'b0, frm_q}           : '0;
       12'h003: csr_rdata_int = (FPU == 1) ? {24'b0, frm_q, fflags_q} : '0;
       12'h006: csr_rdata_int = (FPU == 1) ? {27'b0, fprec_q}         : '0; // Optional precision control for FP DIV/SQRT Unit
+`ifdef STATUS_BASED
+      /********************* Aggiunta sb fpu : I vari registri per selezionare i formati ****************************/
+      /* 0x007 : Seleziona solo fpu_fmt_dst                                                                         */
+      /* 0x008 : Seleziona solo fpu_fmt_src (per fare casting)                                                      */
+      /* 0x009 : Seleziona solo fpu_ifmt (per fare casting)                                                         */
+      /* 0x00a : Per fare casting da FP -> FP, permette di scivere il source e destination in una scittura sola     */
+      /* 0x00b : Per fare casting da FP -> INT, permette di scrivere in un unica scrittura fpu_fmt_dst e fpu_ifmt   */
+      /* 0x00c : Per fare casting da INT -> FP, permette di scrivere in un unica scrittura fpu_fmt_src e fpu_ifmt   */
+      /**************************************************************************************************************/
+      12'h007: csr_rdata_int = (FPU == 1) ? {                    {(32-C_FPNEW_FMTBITS){1'b0}},                fpu_dst_fmt_q} : '0;
+      12'h008: csr_rdata_int = (FPU == 1) ? {                    {(32-C_FPNEW_FMTBITS){1'b0}},                fpu_src_fmt_q} : '0;
+      12'h009: csr_rdata_int = (FPU == 1) ? {                   {(32-C_FPNEW_IFMTBITS){1'b0}},                   fpu_ifmt_q} : '0;
+      12'h00a: csr_rdata_int = (FPU == 1) ? {                  {(32-2*C_FPNEW_FMTBITS){1'b0}}, fpu_src_fmt_q, fpu_dst_fmt_q} : '0;
+      12'h00b: csr_rdata_int = (FPU == 1) ? { {(32-(C_FPNEW_IFMTBITS+C_FPNEW_FMTBITS)){1'b0}},    fpu_ifmt_q, fpu_src_fmt_q} : '0;
+      12'h00c: csr_rdata_int = (FPU == 1) ? { {(32-(C_FPNEW_IFMTBITS+C_FPNEW_FMTBITS)){1'b0}},    fpu_ifmt_q, fpu_dst_fmt_q} : '0;
+
+      /************************* Added for sb ivec : new register for format selection ***************************
+       * 0x00d : Select the format for ivec instructions                                                         *
+       * 0x00e : Counter of the current mixed precision operation                                                *
+       ***********************************************************************************************************/
+      12'h00d: csr_rdata_int = {      {(32-IVEC_FMT_BITS){1'b0}},         ivec_fmt_q};
+      12'h00e: csr_rdata_int = { {(32-NBITS_MIXED_CYCLES){1'b0}}, ivec_mixed_cycle_q};      
+      12'h00f: csr_rdata_int = {      {(32-NBITS_MAX_KER){1'b0}},   ivec_skip_size_q};      
+`endif	
       // mstatus: always M-mode, contains IE bit
       12'h300: csr_rdata_int = {
                                   14'b0,
@@ -460,6 +525,15 @@ if(PULP_SECURE==1) begin
     fflags_n                 = fflags_q;
     frm_n                    = frm_q;
     fprec_n                  = fprec_q;
+`ifdef STATUS_BASED
+    fpu_dst_fmt_n            = fpu_dst_fmt_q;      //aggiunta sb fpu
+    fpu_src_fmt_n            = fpu_src_fmt_q;      //aggiunta sb fpu
+    fpu_ifmt_n               = fpu_ifmt_q;         //aggiunta sb fpu
+    ivec_fmt_n               = ivec_fmt_q;         //added ivec sb
+    ivec_mixed_cycle_n       = ivec_mixed_cycle_q; //added for ivec sb
+    ivec_skip_size_n         = ivec_skip_size_q;   //added for ivec sb
+`endif
+
     mscratch_n               = mscratch_q;
     mepc_n                   = mepc_q;
     uepc_n                   = uepc_q;
@@ -493,6 +567,42 @@ if(PULP_SECURE==1) begin
          frm_n    = (FPU == 1) ? csr_wdata_int[C_RM+C_FFLAG-1:C_FFLAG] : '0;
       end
       12'h006: if (csr_we_int) fprec_n = (FPU == 1) ? csr_wdata_int[C_PC-1:0]    : '0;
+`ifdef STATUS_BASED
+     /********************* Aggiunta sb fpu : I vari registri per selezionare i formati ****************************/
+      /* 0x007 : Seleziona solo fpu_fmt_dst                                                                         */
+      /* 0x008 : Seleziona solo fpu_fmt_src (per fare casting)                                                      */
+      /* 0x009 : Seleziona solo fpu_ifmt (per fare casting)                                                         */
+      /* 0x00a : Per fare casting da FP -> FP, permette di scivere il source e destination in una scittura sola     */
+      /* 0x00b : Per fare casting da FP -> INT, permette di scrivere in un unica scrittura fpu_fmt_dst e fpu_ifmt   */
+      /* 0x00c : Per fare casting da INT -> FP, permette di scrivere in un unica scrittura fpu_fmt_src e fpu_ifmt   */
+      /**************************************************************************************************************/
+      12'h007: if (csr_we_int) fpu_dst_fmt_n  = (FPU == 1) ? csr_wdata_int[C_FPNEW_FMTBITS-1:0]   : '0; 
+      12'h008: if (csr_we_int) fpu_src_fmt_n = (FPU == 1) ? csr_wdata_int[C_FPNEW_FMTBITS-1:0]   : '0;
+      12'h009: if (csr_we_int) fpu_ifmt_n = (FPU == 1) ? csr_wdata_int[C_FPNEW_IFMTBITS-1:0]  : '0;
+      12'h00a: if (csr_we_int)
+      begin
+         fpu_dst_fmt_n  = (FPU == 1) ? csr_wdata_int[C_FPNEW_FMTBITS-1:0]  : '0;
+         fpu_src_fmt_n = (FPU == 1) ? csr_wdata_int[2*C_FPNEW_FMTBITS-1:C_FPNEW_FMTBITS]  : '0;
+      end
+      12'h00b: if (csr_we_int)
+      begin
+         fpu_src_fmt_n = (FPU == 1) ? csr_wdata_int[C_FPNEW_FMTBITS-1:0]  : '0;
+         fpu_ifmt_n = (FPU == 1) ? csr_wdata_int[C_FPNEW_IFMTBITS+C_FPNEW_FMTBITS-1:C_FPNEW_FMTBITS]  : '0;
+      end
+      12'h00c: if (csr_we_int) 
+      begin
+         fpu_dst_fmt_n  = (FPU == 1) ? csr_wdata_int[C_FPNEW_FMTBITS-1:0]  : '0;
+         fpu_ifmt_n = (FPU == 1) ? csr_wdata_int[C_FPNEW_IFMTBITS+C_FPNEW_FMTBITS-1:C_FPNEW_FMTBITS]  : '0;
+      end     
+
+      /************************* Added for sb ivec : new register for format selection ***************************
+       * 0x00d : Select the format for ivec instructions                                                         *
+       * 0x00e : Counter of the current mixed precision operation                                                *
+       ***********************************************************************************************************/
+      12'h00d: if (csr_we_int) ivec_fmt_n = ivec_mode_fmt'(csr_wdata_int[IVEC_FMT_BITS-1:0]); 
+      12'h00e: if (csr_we_int) ivec_mixed_cycle_n = csr_wdata_int[NBITS_MIXED_CYCLES-1:0];     
+      12'h00f: if (csr_we_int) ivec_skip_size_n = csr_wdata_int[NBITS_MAX_KER-1:0];     
+`endif
 
       // mstatus: IE bit
       12'h300: if (csr_we_int) begin
@@ -719,6 +829,14 @@ end else begin //PULP_SECURE == 0
     fflags_n                 = fflags_q;
     frm_n                    = frm_q;
     fprec_n                  = fprec_q;
+`ifdef STATUS_BASED
+    fpu_dst_fmt_n            = fpu_dst_fmt_q;  //aggiunta sb fpu
+    fpu_src_fmt_n            = fpu_src_fmt_q; //aggiunta sb fpu
+    fpu_ifmt_n               = fpu_ifmt_q; //aggiunta sb fpu
+    ivec_fmt_n               = ivec_fmt_q; //added for ivec sb
+    ivec_mixed_cycle_n       = ivec_mixed_cycle_q; //added for ivec sb
+    ivec_skip_size_n         = ivec_skip_size_q;   //added for ivec sb     
+`endif
     mscratch_n               = mscratch_q;
     mepc_n                   = mepc_q;
     depc_n                   = depc_q;
@@ -750,7 +868,42 @@ end else begin //PULP_SECURE == 0
          frm_n    = (FPU == 1) ? csr_wdata_int[C_RM+C_FFLAG-1:C_FFLAG] : '0;
       end
       12'h006: if (csr_we_int) fprec_n = (FPU == 1) ? csr_wdata_int[C_PC-1:0]    : '0;
+`ifdef STATUS_BASED
+      /********************* Aggiunta sb fpu : I vari registri per selezionare i formati ****************************/
+      /* 0x007 : Seleziona solo fpu_fmt_dst                                                                         */
+      /* 0x008 : Seleziona solo fpu_fmt_src (per fare casting)                                                      */
+      /* 0x009 : Seleziona solo fpu_ifmt (per fare casting)                                                         */
+      /* 0x00a : Per fare casting da FP -> FP, permette di scivere il source e destination in una scittura sola     */
+      /* 0x00b : Per fare casting da FP -> INT, permette di scrivere in un unica scrittura fpu_fmt_dst e fpu_ifmt   */
+      /* 0x00c : Per fare casting da INT -> FP, permette di scrivere in un unica scrittura fpu_fmt_src e fpu_ifmt   */
+      /**************************************************************************************************************/
+      12'h007: if (csr_we_int) fpu_dst_fmt_n  = (FPU == 1) ? csr_wdata_int[C_FPNEW_FMTBITS-1:0]   : '0; 
+      12'h008: if (csr_we_int) fpu_src_fmt_n = (FPU == 1) ? csr_wdata_int[C_FPNEW_FMTBITS-1:0]   : '0;
+      12'h009: if (csr_we_int) fpu_ifmt_n = (FPU == 1) ? csr_wdata_int[C_FPNEW_IFMTBITS-1:0]  : '0;
+      12'h00a: if (csr_we_int)
+      begin
+         fpu_dst_fmt_n  = (FPU == 1) ? csr_wdata_int[C_FPNEW_FMTBITS-1:0]  : '0;
+         fpu_src_fmt_n = (FPU == 1) ? csr_wdata_int[2*C_FPNEW_FMTBITS-1:C_FPNEW_FMTBITS]  : '0;
+      end
+      12'h00b: if (csr_we_int)
+      begin
+         fpu_src_fmt_n = (FPU == 1) ? csr_wdata_int[C_FPNEW_FMTBITS-1:0]  : '0;
+         fpu_ifmt_n = (FPU == 1) ? csr_wdata_int[C_FPNEW_IFMTBITS+C_FPNEW_FMTBITS-1:C_FPNEW_FMTBITS]  : '0;
+      end
+      12'h00c: if (csr_we_int) 
+      begin
+         fpu_dst_fmt_n  = (FPU == 1) ? csr_wdata_int[C_FPNEW_FMTBITS-1:0]  : '0;
+         fpu_ifmt_n = (FPU == 1) ? csr_wdata_int[C_FPNEW_IFMTBITS+C_FPNEW_FMTBITS-1:C_FPNEW_FMTBITS]  : '0;
+      end
+      /************************* Added for sb ivec : new register for format selection ***************************
+       * 0x00d : Select the format for ivec instructions                                                         *
+       * 0x00e : Counter of the current mixed precision operation                                                *
+       ***********************************************************************************************************/
+      12'h00d: if (csr_we_int) ivec_fmt_n = ivec_mode_fmt'(csr_wdata_int[IVEC_FMT_BITS-1:0]); 
+      12'h00e: if (csr_we_int) ivec_mixed_cycle_n = csr_wdata_int[NBITS_MIXED_CYCLES-1:0];     
+      12'h00f: if (csr_we_int) ivec_skip_size_n = csr_wdata_int[NBITS_MAX_KER-1:0];
 
+`endif
       // mstatus: IE bit
       12'h300: if (csr_we_int) begin
         mstatus_n = '{
@@ -901,7 +1054,15 @@ end //PULP_SECURE
   assign sec_lvl_o       = priv_lvl_q[0];
   assign frm_o           = (FPU == 1) ? frm_q : '0;
   assign fprec_o         = (FPU == 1) ? fprec_q : '0;
+`ifdef STATUS_BASED
+  assign fpu_dst_fmt_o   = (FPU == 1) ? fpu_dst_fmt_q : '0;  //aggiunta sb fpu
+  assign fpu_src_fmt_o   = (FPU == 1) ? fpu_src_fmt_q : '0; //aggiunta sb fpu
+  assign fpu_ifmt_o      = (FPU == 1) ? fpu_ifmt_q : '0; //aggiunta sb fpu
+  assign ivec_fmt_o      = ivec_fmt_q;  //added for ivec sb : output directly the format for ivec
+  assign ivec_mixed_cycle_o = ivec_mixed_cycle_q; //added for ivec sb : output directly the counter of cycle for ivec sb
+  assign ivec_skip_size_o   = ivec_skip_size_q;   //added for ivec sb : output directly the skip size value      
 
+`endif
   assign mtvec_o         = mtvec_q;
   assign utvec_o         = utvec_q;
 
@@ -991,6 +1152,11 @@ end //PULP_SECURE
         frm_q          <= '0;
         fflags_q       <= '0;
         fprec_q        <= '0;
+`ifdef STATUS_BASED
+        fpu_dst_fmt_q  <= fpnew_pkg::FP32; //aggiunta sb fpu
+        fpu_src_fmt_q  <= fpnew_pkg::FP32; //aggiunta sb fpu
+        fpu_ifmt_q     <= fpnew_pkg::INT32; //aggiunta sb fpu
+`endif
       end
       mstatus_q  <= '{
               uie:  1'b0,
@@ -1009,6 +1175,11 @@ end //PULP_SECURE
       dscratch0_q <= '0;
       dscratch1_q <= '0;
       mscratch_q  <= '0;
+`ifdef STATUS_BASED
+      ivec_fmt_q <= VEC_MODE32; //added for ivec sb : reset ivec format value
+      ivec_mixed_cycle_q <= '0; //added for ivec sb : reset the cycles counter
+      ivec_skip_size_q <= '0;   //added for ivec sb : reset skip size value       
+`endif	
     end
     else
     begin
@@ -1017,6 +1188,11 @@ end //PULP_SECURE
         frm_q      <= frm_n;
         fflags_q   <= fflags_n;
         fprec_q    <= fprec_n;
+`ifdef STATUS_BASED
+        fpu_dst_fmt_q  <= fpu_dst_fmt_n;  //aggiunta sb fpu
+        fpu_src_fmt_q  <= fpu_src_fmt_n; //aggiunta sb fpu
+        fpu_ifmt_q <= fpu_ifmt_n; //aggiunta sb fpu
+`endif
       end
       if (PULP_SECURE == 1) begin
         mstatus_q      <= mstatus_n ;
@@ -1038,6 +1214,11 @@ end //PULP_SECURE
       dscratch0_q<= dscratch0_n;
       dscratch1_q<= dscratch1_n;
       mscratch_q <= mscratch_n;
+`ifdef STATUS_BASED
+      ivec_fmt_q <= ivec_fmt_n; //added for ivec sb : updated to the new value
+      ivec_mixed_cycle_q <= ivec_mixed_cycle_n; //added for ivec sb : update the new value
+      ivec_skip_size_q   <= ivec_skip_size_n;   //Added for ivec sb : update new value           
+`endif
     end
   end
 

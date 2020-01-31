@@ -90,7 +90,14 @@ module riscv_decoder
   output logic [2:0]                  alu_op_a_mux_sel_o, // operand a selection: reg value, PC, immediate or zero
   output logic [2:0]                  alu_op_b_mux_sel_o, // operand b selection: reg value or immediate
   output logic [1:0]                  alu_op_c_mux_sel_o, // operand c selection: reg value or jump target
+`ifndef STATUS_BASED
   output logic [2:0]                  alu_vec_mode_o, // selects between 32 bit, 16 bit and 8 bit vectorial modes
+`else
+  input                               ivec_mode_fmt ivec_fmt_i, //Added for ivec sb : now the correct VEC_MODE it's selected via cs register (for integer operations)
+  output                              ivec_mode_fmt alu_vec_mode_o, // selects between 32 bit, 16 bit and 8 bit vectorial modes -- Modified for ivec sb : changed from logic to ivec_mode_fmt
+  output logic                        ivec_op_o, // Added for ivec sb : This is needed inside the alu beacuse in RISCY core VEC_MODE32 was used to discriminate between non vectorial and vectorial mode
+                                                 // but now vec_mode != 32 will be used even for scalar operation so this signal will restore normal operation 
+`endif
   output logic                        scalar_replication_o, // scalar replication enable
   output logic                        scalar_replication_c_o, // scalar replication enable for operand C
   output logic [0:0]                  imm_a_mux_sel_o, // immediate selection for operand a
@@ -100,7 +107,11 @@ module riscv_decoder
   output logic                        is_subrot_o,
 
   // MUL related control signals
+`ifndef STATUS_BASED
   output logic [3:0]                  mult_operator_o, // Multiplication operation selection
+`else
+  output mult_op_type                 mult_operator_o, // Multiplication operation selection //Modified ivec sb : changed from logic to mult_op_type
+`endif	
   output logic                        mult_int_en_o, // perform integer multiplication
   output logic                        mult_dot_en_o, // perform dot multiplication
   output logic [0:0]                  mult_imm_mux_o, // Multiplication immediate mux selector
@@ -113,10 +124,14 @@ module riscv_decoder
 
   // FPU
   input logic [C_RM-1:0]              frm_i, // Rounding mode from float CSR
-
+`ifdef STATUS_BASED
+  input logic [C_FPNEW_FMTBITS-1:0]   fpu_dst_fmt_i, //Aggiunta sb fpu: Ora il formato ce l'ho pure in ingresso
+  input logic [C_FPNEW_FMTBITS-1:0]   fpu_src_fmt_i, //Aggiunta sb fpu: stessa cosa del formato di destinazione
+  input logic [C_FPNEW_IFMTBITS-1:0]  fpu_ifmt_i, //Aggiunta sb fpu: stessa cosa del formato di destinazione
+`endif
   output logic [C_FPNEW_FMTBITS-1:0]  fpu_dst_fmt_o, // fpu destination format
   output logic [C_FPNEW_FMTBITS-1:0]  fpu_src_fmt_o, // fpu source format
-  output logic [C_FPNEW_IFMTBITS-1:0] fpu_int_fmt_o, // fpu integer format (for casts)
+  output logic [C_FPNEW_IFMTBITS-1:0] fpu_ifmt_o, // fpu integer format (for casts)
 
   // APU
   output logic                        apu_en_o,
@@ -133,6 +148,10 @@ module riscv_decoder
   output logic                        regfile_alu_waddr_sel_o, // Select register write address for ALU/MUL operations
 
   // CSR manipulation
+`ifdef STATUS_BASED
+  output logic [3:0]                  write_sb_csr_o, //aggiunta sb fpu: bit 0 -> Scrivo il dst_fmt, bit 1 -> Scrivo il src_fmt, bit 2 -> Scrivo ifmt
+                                                      //Added ivec sb : Also added a fourth bit to discriminate if VEC_MODE cs is being written
+`endif
   output logic                        csr_access_o, // access to CSR
   output logic                        csr_status_o, // access to xstatus CSR
   output logic [1:0]                  csr_op_o, // operation to perform on CSR
@@ -204,7 +223,11 @@ module riscv_decoder
   logic                      fpu_vec_op; // fpu vectorial operation
   // unittypes for latencies to help us decode for APU
   enum logic[1:0] {ADDMUL, DIVSQRT, NONCOMP, CONV} fp_op_group;
-
+`ifdef STATUS_BASED
+  //Aggiunta sb fpu: Estraggo i bit dell'indirizzo nel caso di una scrittura csr
+  logic [11:0] csr_sb_fpu_addr;
+`endif	
+   
 
   /////////////////////////////////////////////
   //   ____                     _            //
@@ -225,7 +248,12 @@ module riscv_decoder
     alu_op_a_mux_sel_o          = OP_A_REGA_OR_FWD;
     alu_op_b_mux_sel_o          = OP_B_REGB_OR_FWD;
     alu_op_c_mux_sel_o          = OP_C_REGC_OR_FWD;
+`ifndef STATUS_BASED
     alu_vec_mode_o              = VEC_MODE32;
+`else
+    alu_vec_mode_o              = (instr_rdata_i[6:0] == OPCODE_VECOP) ? ivec_fmt_i : VEC_MODE32; //Modified for ivec sb : Now the default value will be select via cs reg
+    ivec_op_o                   = 1'b0;       //Added for ivec sb : Initialization of ivec_op
+`endif
     scalar_replication_o        = 1'b0;
     scalar_replication_c_o      = 1'b0;
     regc_mux_o                  = REGC_ZERO;
@@ -252,9 +280,15 @@ module riscv_decoder
     fpu_op                      = fpnew_pkg::SGNJ;
     fpu_op_mod                  = 1'b0;
     fpu_vec_op                  = 1'b0;
+`ifndef STATUS_BASED
     fpu_dst_fmt_o               = fpnew_pkg::FP32;
     fpu_src_fmt_o               = fpnew_pkg::FP32;
     fpu_int_fmt_o               = fpnew_pkg::INT32;
+`else
+    fpu_dst_fmt_o               = fpu_dst_fmt_i; //Modifica sb fpu: Lo inizializzo all'ingresso per ora
+    fpu_src_fmt_o               = fpu_src_fmt_i; //Aggiunta sb fpu: inizializzo all'ingresso
+    fpu_ifmt_o                  = fpu_ifmt_i;    //Aggiunta sb fpu: inizializzo all'ingresso
+`endif
     check_fprm                  = 1'b0;
     fp_op_group                 = ADDMUL;
 
@@ -312,7 +346,10 @@ module riscv_decoder
     mret_dec_o                  = 1'b0;
     uret_dec_o                  = 1'b0;
     dret_dec_o                  = 1'b0;
-
+`ifdef STATUS_BASED
+    csr_sb_fpu_addr             = instr_rdata_i[31:20]; //aggiunta sb fpu
+    write_sb_csr_o              = '0; //Added for sb fpu : default value for write_sb_csr
+`endif
     unique case (instr_rdata_i[6:0])
 
       //////////////////////////////////////
@@ -697,7 +734,7 @@ module riscv_decoder
               // by default we need to verify rm is legal but assume it is for now
               check_fprm       = 1'b1;
               fp_rnd_mode_o    = frm_i; // all vectorial ops have rm from fcsr
-
+`ifndef STATUS_BASED
               // Decode Formats
               unique case (instr_rdata_i[13:12])
                 // FP32
@@ -724,7 +761,24 @@ module riscv_decoder
 
               // By default, src=dst
               fpu_src_fmt_o = fpu_dst_fmt_o;
+`else
+               //Aggiunta sb fpu : alzo l'uscita alu_vec_mode_o al valore corretto
+               unique case(fpu_dst_fmt_o)
+                 fpnew_pkg::FP32: begin
+                    alu_vec_mode_o = VEC_MODE32;
+                 end
+                 fpnew_pkg::FP16: begin
+                    alu_vec_mode_o = VEC_MODE16;
+                 end
+                 fpnew_pkg::FP16ALT: begin
+                    alu_vec_mode_o = VEC_MODE16;
+                 end
+                 fpnew_pkg::FP8: begin
+                    alu_vec_mode_o = VEC_MODE8;
+                 end
+               endcase
 
+`endif
               // decode vectorial FP instruction
               unique case (instr_rdata_i[29:25]) inside
                 // vfadd.vfmt - Vectorial FP Addition
@@ -856,15 +910,17 @@ module riscv_decoder
                       fpu_op_mod  = instr_rdata_i[14]; // signed/unsigned switch
                       apu_type_o  = APUTYPE_CAST;
                       // Integer width matches FP width
+`ifndef STATUS_BASED
                       unique case (instr_rdata_i[13:12])
                         // FP32
-                        2'b00 : fpu_int_fmt_o = fpnew_pkg::INT32;
+                        2'b00 : fpu_ifmt_o = fpnew_pkg::INT32;
                         // FP16[ALT]
                         2'b01,
-                        2'b10: fpu_int_fmt_o = fpnew_pkg::INT16;
+                        2'b10 : fpu_ifmt_o = fpnew_pkg::INT16;
                         // FP8
-                        2'b11: fpu_int_fmt_o = fpnew_pkg::INT8;
+                        2'b11 : fpu_ifmt_o = fpnew_pkg::INT8;
                       endcase
+`endif
                       // Int to FP conversion
                       if (instr_rdata_i[20]) begin
                         reg_fp_a_o = 1'b0; // go from integer regfile
@@ -882,6 +938,26 @@ module riscv_decoder
                       fp_op_group = CONV;
                       apu_type_o  = APUTYPE_CAST;
                       // check source format
+`ifdef STATUS_BASED
+                       unique case(instr_rdata_i[21:20])
+                         2'b00: begin
+                            if (~C_RVF)
+                              illegal_insn_o = 1'b1;
+                         end
+                         2'b01: begin
+                            if (~C_XF16ALT)
+                              illegal_insn_o = 1'b1;                         
+                         end
+                         2'b10: begin
+                            if (~C_XF16)
+                              illegal_insn_o = 1'b1;                           
+                         end
+                         2'b11: begin
+                            if (~C_XF8)
+                              illegal_insn_o = 1'b1;
+                         end
+                       endcase
+`else
                       unique case (instr_rdata_i[21:20])
                         // Only process instruction if corresponding extension is active (static)
                         2'b00: begin
@@ -901,6 +977,7 @@ module riscv_decoder
                           if (~C_XF8) illegal_insn_o = 1'b1;
                         end
                       endcase
+`endif
                       // R must not be set
                       if (instr_rdata_i[14]) illegal_insn_o = 1'b1;
                     end
@@ -1002,12 +1079,16 @@ module riscv_decoder
 
                   // vfcpk{a-d}.vfmt.d - from double
                   if (instr_rdata_i[26]) begin
+`ifndef STATUS_BASED
                     fpu_src_fmt_o  = fpnew_pkg::FP64;
+`endif
                     if (~C_RVD) illegal_insn_o = 1'b1;
                   end
                   // vfcpk{a-d}.vfmt.s
                   else begin
+`ifndef STATUS_BASED
                     fpu_src_fmt_o  = fpnew_pkg::FP32;
+`endif
                     if (~C_RVF) illegal_insn_o = 1'b1;
                   end
                   // Resolve legal vfcpk / format combinations (mostly static)
@@ -1277,7 +1358,7 @@ module riscv_decoder
           // by default we need to verify rm is legal but assume it is for now
           check_fprm       = 1'b1;
           fp_rnd_mode_o    = instr_rdata_i[14:12];
-
+`ifndef STATUS_BASED
           // Decode Formats (preliminary, can change for some ops)
           unique case (instr_rdata_i[26:25])
             // FP32
@@ -1297,7 +1378,7 @@ module riscv_decoder
 
           // By default, src=dst
           fpu_src_fmt_o = fpu_dst_fmt_o;
-
+`endif
           // decode FP instruction
           unique case (instr_rdata_i[31:27])
             // fadd.fmt - FP Addition
@@ -1385,13 +1466,15 @@ module riscv_decoder
                     illegal_insn_o = 1'b1;
                   end
                   // FP16ALT uses special encoding here
+`ifndef STATUS_BASED
                   if (instr_rdata_i[14]) begin
                     fpu_dst_fmt_o = fpnew_pkg::FP16ALT;
                     fpu_src_fmt_o = fpnew_pkg::FP16ALT;
-                  end else begin
+                  end else
+`endif
+		 if (instr_rdata_i[14] == 0)
                     fp_rnd_mode_o = {1'b0, instr_rdata_i[13:12]};
-                  end
-                end else begin
+		else begin
                   if (!(instr_rdata_i[14:12] inside {[3'b000:3'b010]})) illegal_insn_o = 1'b1;
                 end
               end
@@ -1420,13 +1503,15 @@ module riscv_decoder
                   if (!(instr_rdata_i[14:12] inside {[3'b000:3'b001], [3'b100:3'b101]})) begin
                     illegal_insn_o = 1'b1;
                   end
+`ifndef STATUS_BASED
                   // FP16ALT uses special encoding here
                   if (instr_rdata_i[14]) begin
                     fpu_dst_fmt_o = fpnew_pkg::FP16ALT;
                     fpu_src_fmt_o = fpnew_pkg::FP16ALT;
-                  end else begin
-                    fp_rnd_mode_o = {1'b0, instr_rdata_i[13:12]};
-                  end
+                  end else 
+`endif
+		if (instr_rdata_i[14] == 0) 
+                    fp_rnd_mode_o = {1'b0, instr_rdata_i[13:12]};                  
                 end else begin
                   if (!(instr_rdata_i[14:12] inside {[3'b000:3'b001]})) illegal_insn_o = 1'b1;
                 end
@@ -1449,6 +1534,7 @@ module riscv_decoder
                 apu_type_o    = APUTYPE_CAST;
                 // bits [22:20] used, other bits must be 0
                 if (instr_rdata_i[24:23]) illegal_insn_o = 1'b1;
+`ifndef STATUS_BASED
                 // check source format
                 unique case (instr_rdata_i[22:20])
                   // Only process instruction if corresponding extension is active (static)
@@ -1474,6 +1560,7 @@ module riscv_decoder
                   end
                   default: illegal_insn_o = 1'b1;
                 endcase
+`endif
               end
             end
             // fmulex.s.fmt - FP Expanding Multiplication to FP32
@@ -1525,13 +1612,15 @@ module riscv_decoder
                   if (!(instr_rdata_i[14:12] inside {[3'b000:3'b010], [3'b100:3'b110]})) begin
                     illegal_insn_o = 1'b1;
                   end
+`ifndef STATUS_BASED
                   // FP16ALT uses special encoding here
                   if (instr_rdata_i[14]) begin
                     fpu_dst_fmt_o = fpnew_pkg::FP16ALT;
                     fpu_src_fmt_o = fpnew_pkg::FP16ALT;
-                  end else begin
-                    fp_rnd_mode_o = {1'b0, instr_rdata_i[13:12]};
-                  end
+                  end else
+`endif
+		  if (instr_rdata[14] == 0)
+                    fp_rnd_mode_o = {1'b0, instr_rdata_i[13:12]};                  
                 end else begin
                   if (!(instr_rdata_i[14:12] inside {[3'b000:3'b010]})) illegal_insn_o = 1'b1;
                 end
@@ -1547,7 +1636,7 @@ module riscv_decoder
               apu_type_o    = APUTYPE_CAST;
               apu_op_o      = 2'b1;
               apu_lat_o     = (PIPE_REG_CAST==1) ? 2'h2 : 2'h1;
-
+`ifndef STATUS_BASED
               unique case (instr_rdata_i[26:25]) //fix for casting to different formats other than FP32
                 2'b00: begin
                   if (~C_RVF) illegal_insn_o = 1;
@@ -1572,6 +1661,25 @@ module riscv_decoder
                   else fpu_src_fmt_o = fpnew_pkg::FP8;
                 end
               endcase // unique case (instr_rdata_i[26:25])
+`else
+	case (fpu_src_fmt_o)
+	fpnew_pkg::FP64 : begin
+		if(~C_RVD) illegal_insn_o = 1;
+	end	
+	fpnew_pkg::FP32 : begin
+		if(~C_RVF) illegal_insn_o = 1;
+	end	
+	fpnew_pkg::FP16 : begin
+		if(~C_XF16) illegal_insn_o = 1;
+	end	
+	fpnew_pkg::FP16ALT : begin
+		if(~C_XF16ALT) illegal_insn_o = 1;
+	end	
+	fpnew_pkg::FP8 : begin
+		if(~C_XF8) illegal_insn_o = 1;
+	end	
+	endcase
+`endif
               // bits [21:20] used, other bits must be 0
               if (instr_rdata_i[24:21]) illegal_insn_o = 1'b1;   // in RV32, no casts to L allowed.
             end
@@ -1623,19 +1731,23 @@ module riscv_decoder
                   fpu_op_mod          = 1'b1;    // sign-extend result
                   fp_rnd_mode_o       = 3'b011;  // passthrough without checking nan-box
                   // FP16ALT uses special encoding here
+`ifndef STATUS_BASED
                   if (instr_rdata_i[14]) begin
                     fpu_dst_fmt_o = fpnew_pkg::FP16ALT;
                     fpu_src_fmt_o = fpnew_pkg::FP16ALT;
                   end
+`endif
                 // fclass.fmt - FP Classify
                 end else if (instr_rdata_i[14:12] == 3'b001 || (C_XF16ALT && instr_rdata_i[14:12] == 3'b101)) begin
                   fpu_op        = fpnew_pkg::CLASSIFY;
                   fp_rnd_mode_o = 3'b000;
                   // FP16ALT uses special encoding here
+`ifndef STATUS_BASED
                   if (instr_rdata_i[14]) begin
                     fpu_dst_fmt_o = fpnew_pkg::FP16ALT;
                     fpu_src_fmt_o = fpnew_pkg::FP16ALT;
                   end
+`endif
                 end else begin
                   illegal_insn_o = 1'b1;
                 end
@@ -1665,10 +1777,12 @@ module riscv_decoder
                 check_fprm          = 1'b0; // instruction encoded in rm, do the check here
                 if (instr_rdata_i[14:12] == 3'b000 || (C_XF16ALT && instr_rdata_i[14:12] == 3'b100)) begin
                   // FP16ALT uses special encoding here
+`ifndef STATUS_BASED
                   if (instr_rdata_i[14]) begin
                     fpu_dst_fmt_o = fpnew_pkg::FP16ALT;
                     fpu_src_fmt_o = fpnew_pkg::FP16ALT;
                   end
+`endif
                 end else begin
                   illegal_insn_o = 1'b1;
                 end
@@ -1771,7 +1885,7 @@ module riscv_decoder
           reg_fp_c_o       = 1'b1;
           reg_fp_d_o       = 1'b1;
           fp_rnd_mode_o    = instr_rdata_i[14:12];
-
+`ifndef STATUS_BASED
           // Decode Formats
           unique case (instr_rdata_i[26:25])
             // FP32
@@ -1790,7 +1904,7 @@ module riscv_decoder
 
           // By default, src=dst
           fpu_src_fmt_o = fpu_dst_fmt_o;
-
+`endif
           // decode FP intstruction
           unique case (instr_rdata_i[6:0])
             // fmadd.fmt - FP Fused multiply-add
@@ -2051,8 +2165,9 @@ module riscv_decoder
         regfile_alu_we      = 1'b1;
         rega_used_o         = 1'b1;
         imm_b_mux_sel_o     = IMMB_VS;
-
+	ivec_op_o	    = 1'b1;
         // vector size
+`ifndef STATUS_BASED
         unique case( instr_rdata_i[14:12])
           3'b000: begin alu_vec_mode_o = VEC_MODE16; mult_operator_o = MUL_DOT16; regb_used_o = 1'b1; end
           3'b100: begin
@@ -2109,6 +2224,63 @@ module riscv_decoder
                   end
           default: illegal_insn_o = 1'b1;
         endcase
+`else
+        if (instr_rdata_i[12]) begin
+          alu_vec_mode_o  = VEC_MODE8;
+          mult_operator_o = MUL_DOT8;
+        end else begin
+          alu_vec_mode_o = VEC_MODE16;
+          mult_operator_o = MUL_DOT16;
+        end
+          ****************************************************************************/
+         /*
+         if (alu_vec_mode_o == VEC_MODE16) begin
+            mult_operator_o = MUL_DOT16;          
+         end
+         else if (alu_vec_mode_o == VEC_MODE8) begin
+            mult_operator_o = MUL_DOT8;
+         end
+          */
+         // Added for ivec sb : mult_operator_o it's correctly in accordance with his VEC_MODE
+         case(alu_vec_mode_o)
+           VEC_MODE16 :
+             mult_operator_o = MUL_DOT16;
+           VEC_MODE8  :
+             mult_operator_o = MUL_DOT8;
+           VEC_MODE4  :
+             mult_operator_o = MUL_DOT4;
+           VEC_MODE2  :
+             mult_operator_o = MUL_DOT2;
+           MIXED_2x4  :
+             mult_operator_o = MIXED_MUL_2x4;
+           MIXED_2x8  :
+             mult_operator_o = MIXED_MUL_2x8;
+           MIXED_2x16 :
+             mult_operator_o = MIXED_MUL_2x16;
+           MIXED_4x8  :
+             mult_operator_o = MIXED_MUL_4x8;
+           MIXED_4x16 :
+             mult_operator_o = MIXED_MUL_4x16;
+           MIXED_8x16 :
+             mult_operator_o = MIXED_MUL_8x16;           
+         endcase // case (alu_vec_mode_o)
+        
+        // distinguish normal vector, sc and sci modes
+        if (instr_rdata_i[14]) begin
+          scalar_replication_o = 1'b1;
+
+          if (instr_rdata_i[13]) begin
+            // immediate scalar replication, .sci
+            alu_op_b_mux_sel_o = OP_B_IMM;
+          end else begin
+            // register scalar replication, .sc
+            regb_used_o = 1'b1;
+          end
+        end else begin
+          // normal register use
+          regb_used_o = 1'b1;
+        end
+`endif
 
         // now decode the instruction
         unique case (instr_rdata_i[31:26])
@@ -2156,6 +2328,7 @@ module riscv_decoder
             regc_mux_o     = REGC_RD;
           end
           6'b11100_0: begin // pv.packlo
+`ifndef STATUS_BASED
              if(alu_vec_mode_o == VEC_MODE4 || alu_vec_mode_o == VEC_MODE2) begin
                 qnt_en = 1'b1;   // quantization unit //pv.qnt.n/c
                 prepost_useincr_o = 1'b0;
@@ -2166,6 +2339,12 @@ module riscv_decoder
                 regc_used_o    = 1'b1;
                 regc_mux_o     = REGC_RD;
              end
+`else
+            alu_operator_o = ALU_PCKLO;
+            regb_used_o    = 1'b1;
+            regc_used_o    = 1'b1;
+            regc_mux_o     = REGC_RD;
+`endif
           end
 
           6'b01111_0: begin // pv.extract
@@ -2388,7 +2567,34 @@ module riscv_decoder
           imm_a_mux_sel_o     = IMMA_Z;
           imm_b_mux_sel_o     = IMMB_I;    // CSR address is encoded in I imm
           instr_multicycle_o  = 1'b1;
-
+`ifdef STATUS_BASED
+          //aggiunta sb fpu: Controllo se sto scrivendo e che l'indirizzo sia uno di quelli per la sb fpu
+          //inoltre pongo ad uno il bit che riguarda il tipo di formato che sto modificando
+          /********************* Aggiunta sb fpu : I vari registri per selezionare i formati ****************************
+          * 0x007 : Seleziona solo fpu_dst_fmt                                                                         *
+          * 0x008 : Seleziona solo fpu_src_fmt (per fare casting)                                                      *
+          * 0x009 : Seleziona solo fpu_ifmt (per fare casting)                                                         *
+          * 0x00a : Per fare casting da FP -> FP, permette di scivere il source e destination in una scittura sola     *
+          * 0x00b : Per fare casting da FP -> INT, permette di scrivere in un unica scrittura fpu_dst_fmt e fpu_ifmt   *
+          * 0x00c : Per fare casting da INT -> FP, permette di scrivere in un unica scrittura fpu_src_fmt e fpu_ifmt   *
+          * 0x00d : IVEC csr address
+          **************************************************************************************************************/
+          if (csr_sb_fpu_addr inside {[7:13]} && instr_rdata_i[13:12]==2'b01)  // Modified for ivec sb : Now it goes to 13 instead of 12, 0x00D = 13
+          begin
+             if (csr_sb_fpu_addr == 'h7 || csr_sb_fpu_addr == 'hA || csr_sb_fpu_addr == 'hC) begin
+                write_sb_csr_o |= 4'b0001;
+             end
+             if (csr_sb_fpu_addr == 'h8 || csr_sb_fpu_addr == 'hA || csr_sb_fpu_addr == 'hB) begin
+                write_sb_csr_o |= 4'b0010;
+             end
+             if (csr_sb_fpu_addr == 'h9 || csr_sb_fpu_addr == 'hB || csr_sb_fpu_addr == 'hC) begin
+                write_sb_csr_o |= 4'b0100;
+             end
+             if (csr_sb_fpu_addr == 'hD) begin // Added for ivec sb : Now if ivec csr is being written the correct flag is raised
+                write_sb_csr_o = 4'b1000;               
+             end
+          end
+`endif           
           if (instr_rdata_i[14] == 1'b1) begin
             // rs1 field is used as immediate
             alu_op_a_mux_sel_o = OP_A_IMM;

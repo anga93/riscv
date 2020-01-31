@@ -33,29 +33,33 @@ module riscv_alu
   parameter SHARED_INT_DIV = 0,
   parameter FPU            = 0
 )(
-  input  logic                     clk,
-  input  logic                     rst_n,
-  input  logic                     enable_i,
-  input  logic [ALU_OP_WIDTH-1:0]  operator_i,
-  input  logic [31:0]              operand_a_i,
-  input  logic [31:0]              operand_b_i,
-  input  logic [31:0]              operand_c_i,
+  input logic                    clk,
+  input logic                    rst_n,
+  input logic                    enable_i,
+  input logic [ALU_OP_WIDTH-1:0] operator_i,
+  input logic [31:0]             operand_a_i,
+  input logic [31:0]             operand_b_i,
+  input logic [31:0]             operand_c_i,
 
+`ifndef STATUS_BASED
+  input logic [ 2:0]             vector_mode_i,
+`else
+  input ivec_mode_fmt            vector_mode_i, //Modified for ivec sb : changed from logic to ivec_mode_fmt
+  input logic                    ivec_op_i,     //Added for ivec sb : 1 if the istruction being executed its vectorial
+`endif
+  input logic [ 4:0]             bmask_a_i,
+  input logic [ 4:0]             bmask_b_i,
+  input logic [ 1:0]             imm_vec_ext_i,
 
-  input  logic [ 2:0]              vector_mode_i,
-  input  logic [ 4:0]              bmask_a_i,
-  input  logic [ 4:0]              bmask_b_i,
-  input  logic [ 1:0]              imm_vec_ext_i,
+  input logic                    is_clpx_i,
+  input logic                    is_subrot_i,
+  input logic [ 1:0]             clpx_shift_i,
 
-  input  logic                     is_clpx_i,
-  input  logic                     is_subrot_i,
-  input  logic [ 1:0]              clpx_shift_i,
+  output logic [31:0]            result_o,
+  output logic                   comparison_result_o,
 
-  output logic [31:0]              result_o,
-  output logic                     comparison_result_o,
-
-  output logic                     ready_o,
-  input  logic                     ex_ready_i
+  output logic                   ready_o,
+  input logic                    ex_ready_i
 );
 
 
@@ -188,7 +192,9 @@ module riscv_alu
     if (adder_op_b_negate || (operator_i == ALU_ABS || operator_i == ALU_CLIP)) begin
       // special case for subtractions and absolute number calculations
       adder_in_b[0] = 1'b1;
-
+`ifdef STATUS_BASED
+      if (ivec_op_i) begin
+`endif      
       case (vector_mode_i)
         VEC_MODE16: begin
           adder_in_b[24] = 1'b1;
@@ -228,11 +234,16 @@ module riscv_alu
           adder_in_b[45]   = 1'b1;
         end
       endcase
-
+`ifdef STATUS_BASED
+      end // if (ivec_op_i)      
+`endif
     end else begin
       // take care of partitioning the adder for the addition case
 
       adder_in_a[ 0] = 1'b0;
+`ifdef STATUS_BASED
+      if(ivec_op_i) begin
+`endif
       case (vector_mode_i)
         VEC_MODE16: begin
           adder_in_a[24] = 1'b0;
@@ -271,7 +282,10 @@ module riscv_alu
           adder_in_a[42]   = 1'b0;
           adder_in_a[45]   = 1'b0;
         end
-      endcase
+      endcase // case (vector_mode_i)
+`ifdef STATUS_BASED
+      end // if (ivec_op_i)      
+`endif
     end
   end
 
@@ -338,6 +352,10 @@ module riscv_alu
   // by reversing the bits of the input, we also have to reverse the order of shift amounts
   always_comb
   begin
+    shift_amt_left[31: 0] = shift_amt[31: 0];
+`ifdef STATUS_BASED
+    if (vec_op_i) begin
+`endif
     case(vector_mode_i)
       VEC_MODE16:
       begin
@@ -385,13 +403,10 @@ module riscv_alu
         shift_amt_left[29:28] = shift_amt[ 3: 2];
         shift_amt_left[31:30] = shift_amt[ 1: 0];
       end
-
-
-      default: // VEC_MODE32
-      begin
-        shift_amt_left[31: 0] = shift_amt[31: 0];
-      end
-    endcase
+    endcase // case (vector_mode_i)
+`ifdef STATUS_BASED
+    end // if (vec_op_i)
+`endif
   end
 
   // ALU_FL1 and ALU_CBL are used for the bit counting ops later
@@ -417,12 +432,18 @@ module riscv_alu
                           (shift_left ? shift_amt_left : shift_amt);
 
 
-  always_comb begin
+  always_comb begin    
+  bmask_b_norm = {4{3'b000, bmask_b_i}};
+`ifdef STATUS_BASED
+    if (ivec_op_i) begin
+`endif
   case(vector_mode_i)
     VEC_MODE4:     bmask_b_norm = {8{2'b00, bmask_b_i[1:0]}};
     VEC_MODE2:     bmask_b_norm = {16{1'b0, bmask_b_i[0]}};
-    default:       bmask_b_norm = {4{3'b000, bmask_b_i}};
-  endcase
+  endcase // case (vector_mode_i)
+`ifdef STATUS_BASED
+    end
+`endif
   end
 
   assign shift_amt_norm = is_clpx_i ? {clpx_shift_ex,clpx_shift_ex} : bmask_b_norm; //{4{3'b000, bmask_b_i}}
@@ -436,6 +457,11 @@ module riscv_alu
 
   always_comb
   begin
+
+    shift_right_result = shift_op_a_32 >> shift_amt_int[4:0];
+`ifdef STATUS_BASED
+    if (ivec_op_i) begin
+`endif
     case(vector_mode_i)
       VEC_MODE16:
       begin
@@ -481,11 +507,10 @@ module riscv_alu
           shift_right_result[ 3: 2] = $signed( {shift_arithmetic & shift_op_a[31], shift_op_a[ 3: 2] }) >>> shift_amt_int[ 2];
           shift_right_result[ 1: 0] = $signed( {shift_arithmetic & shift_op_a[31], shift_op_a[ 1: 0] }) >>> shift_amt_int[ 0];
       end
-      default: // VEC_MODE32
-      begin
-          shift_right_result = shift_op_a_32 >> shift_amt_int[4:0];
-      end
     endcase; // case (vec_mode_i)
+`ifdef STATUS_BASED
+    end // if (ivec_op_i)
+`endif
   end
 
   // bit reverse the shift_right_result for left shifts
@@ -541,13 +566,19 @@ module riscv_alu
       ALU_FLT,
       ALU_FMAX,
       ALU_FMIN: begin
+        cmp_signed[15:0] = 16'h8000;
+`ifdef STATUS_BASED
+        if (ivec_op_i) begin
+`endif
         case (vector_mode_i)
           VEC_MODE2:  cmp_signed[15:0] = 16'hFFFF;
           VEC_MODE4:  cmp_signed[15:0] = 16'hAAAA;
           VEC_MODE8:  cmp_signed[15:0] = 16'h8888;
-          VEC_MODE16: cmp_signed[15:0] = 16'h8080;
-          default:    cmp_signed[15:0] = 16'h8000;
-        endcase
+          VEC_MODE16: cmp_signed[15:0] = 16'h8080;          
+        endcase // case (vector_mode_i)
+`ifdef STATUS_BASED
+        end
+`endif
       end
 
       default:;
@@ -572,25 +603,18 @@ module riscv_alu
   always_comb
   begin
     // 32-bit mode
-    //is_equal[0] = 1'b1;
-    //is_greater[0] =1'b0;
-    logic [15:0]temp;
-    //is_greater[0] = is_equal_vec[1] & is_greater_vec[0];
+    logic [15:0] temp;
     temp[0] = is_equal_vec[1] & is_greater_vec[0];
     for(int j=1; j<15; j++ ) begin
-      //is_equal[0] &= is_equal_vec[j];
-      temp[j] = (temp[j-1] | is_greater_vec[j] )& is_equal_vec[j+1];// is_equal_vec[j+1] & is_greater_vec[j];
-      //temp2[j] = temp[j] | is_greater_vec[j+1];
-      //is_greater[0] |= is_equal_vec[j+1] & is_greater_vec[j];
+      temp[j] = (temp[j-1] | is_greater_vec[j] )& is_equal_vec[j+1];
     end
     temp[15] = temp[14] | is_greater_vec[15];
     is_equal[15: 0]    = {16{& is_equal_vec}};
     is_greater[15: 0]  = {16{temp[15]}};
-    //is_equal[3:0]   = {4{is_equal_vec[3] & is_equal_vec[2] & is_equal_vec[1] & is_equal_vec[0]}};
-    //is_greater[3:0] = {4{is_greater_vec[3] | (is_equal_vec[3] & (is_greater_vec[2]
-                                            //| (is_equal_vec[2] & (is_greater_vec[1]
-                                            // | (is_equal_vec[1] & (is_greater_vec[0]))))))}};
 
+`ifdef STATUS_BASED
+    if (ivec_op_i) begin
+`endif
     case(vector_mode_i)
       VEC_MODE16:
       begin
@@ -607,11 +631,6 @@ module riscv_alu
         is_equal  [15: 8]  = {8{ & is_equal_vec[15: 8]}};
         is_greater[ 7: 0]  = {8{temp[7]}};
         is_greater[15: 8]  = {8{temp[15]}};
-
-        //is_equal[1:0]   = {2{is_equal_vec[0]   & is_equal_vec[1]}};
-        //is_equal[3:2]   = {2{is_equal_vec[2]   & is_equal_vec[3]}};
-        //is_greater[1:0] = {2{is_greater_vec[1] | (is_equal_vec[1] & is_greater_vec[0])}};
-        //is_greater[3:2] = {2{is_greater_vec[3] | (is_equal_vec[3] & is_greater_vec[2])}};
       end
 
       VEC_MODE8:
@@ -643,20 +662,9 @@ module riscv_alu
         is_greater[ 7: 4]  = {4{temp[7]}};
         is_greater[11: 8]  = {4{temp[11]}};
         is_greater[15:12]  = {4{temp[15]}};
-        //is_equal  [ 7: 0]  = {8{is_equal[0] & is_equal_vec[7]}};
-        //is_equal  [15: 8]  = {8{is_equal[8] & is_equal_vec[15]}};
-        //is_greater[ 7: 0]  = {8{is_greater[0] | is_greater_vec[7]}};
-        //is_greater[15: 8]  = {8{is_greater[8] | is_greater_vec[15]}};
-        //is_equal[3:0]   = is_equal_vec[3:0];
-        //is_greater[3:0] = is_greater_vec[3:0];
       end
 
       VEC_MODE4: begin
-
-        //is_equal[ 1: 0] = {2{is_equal_vec[1] & is_equal_vec[0]}};
-        //is_equal[ 1: 0] = {2{is_equal_vec[1] & is_equal_vec[0]}};
-        //is_equal[ 1: 0] = {2{is_equal_vec[1] & is_equal_vec[0]}};
-        //is_equal[ 1: 0] = {2{is_equal_vec[1] & is_equal_vec[0]}};
         is_greater[ 1: 0] = {2{is_greater_vec[1] | (is_equal_vec[1] & is_greater_vec[0])}};
         is_greater[ 3: 2] = {2{is_greater_vec[3] | (is_equal_vec[3] & is_greater_vec[2])}};
         is_greater[ 5: 4] = {2{is_greater_vec[5] | (is_equal_vec[5] & is_greater_vec[4])}};
@@ -668,7 +676,6 @@ module riscv_alu
 
         for(int j=0; j<8; j++) begin
           is_equal[2*j +: 1] = {2{is_equal_vec[2*j+1] & is_equal_vec[2*j]}};
-          //is_greater[2*j +:1] = {2{is_greater_vec[2*j+1] | (is_equal_vec[2*j+1] & is_greater_vec[2*j])}};
         end
       end
 
@@ -676,8 +683,10 @@ module riscv_alu
         is_equal  [15: 0] = is_equal_vec[15: 0];
         is_greater[15: 0] = is_greater_vec[15: 0];
       end
-      default:; // see default assignment
-    endcase
+    endcase // case (vector_mode_i)
+`ifdef STATUS_BASED
+    end // if (ivec_op_i)
+`endif
   end
 
   // generate the floating point greater signal, inverted for two negative numbers

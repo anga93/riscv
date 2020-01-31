@@ -63,13 +63,22 @@ module riscv_ex_stage
   input logic [ 4:0]                     bmask_a_i,
   input logic [ 4:0]                     bmask_b_i,
   input logic [ 1:0]                     imm_vec_ext_i,
+`ifndef STATUS_BASED
   input logic [ 2:0]                     alu_vec_mode_i,
+`else
+  input                                  ivec_mode_fmt alu_vec_mode_i, //modified for ivec sb : changed from logic to ivec_mode_fmt
+  input logic                            ivec_op_i, //added for ivec sb : needed inside alu to discriminate between scalar and vectorial operations
+`endif
   input logic                            alu_is_clpx_i,
   input logic                            alu_is_subrot_i,
   input logic [ 1:0]                     alu_clpx_shift_i,
 
   // Multiplier signals
+`ifndef STATUS_BASED
   input logic [ 3:0]                     mult_operator_i,
+`else
+  input mult_op_type                     mult_operator_i, //Modified for ivec sb : changed from logic to mult_op_type
+`endif
   input logic [31:0]                     mult_operand_a_i,
   input logic [31:0]                     mult_operand_b_i,
   input logic [31:0]                     mult_operand_c_i,
@@ -92,6 +101,9 @@ module riscv_ex_stage
   input logic [ 1:0]                     mult_clpx_shift_i,
   input logic                            mult_clpx_img_i,
 
+`ifdef STATUS_BASED
+  input logic [NBITS_MIXED_CYCLES-1:0]   current_cycle_i, //added for ivec sb: used to know at which mixed multiplication position we currently are. 
+`endif
   output logic                           mult_multicycle_o,
 
   // quantization unit signals
@@ -300,6 +312,9 @@ module riscv_ex_stage
     .operand_c_i         ( alu_operand_c_i ),
 
     .vector_mode_i       ( alu_vec_mode_i  ),
+`ifdef STATUS_BASED
+    .ivec_op_i           ( ivec_op_i       ), //added for sb ivec
+`endif
     .bmask_a_i           ( bmask_a_i       ),
     .bmask_b_i           ( bmask_b_i       ),
     .imm_vec_ext_i       ( imm_vec_ext_i   ),
@@ -355,6 +370,9 @@ module riscv_ex_stage
     .dot_op_c_b_i      ( mult_dot_op_c_b_i      ),
     .dot_op_c_i      ( mult_dot_op_c_i      ),
     .dot_signed_i    ( mult_dot_signed_i    ),
+`ifdef STATUS_BASED
+   .current_cycle_i ( current_cycle_i      ),
+`endif
     .is_clpx_i       ( mult_is_clpx_i       ),
     .clpx_shift_i    ( mult_clpx_shift_i    ),
     .clpx_img_i      ( mult_clpx_img_i      ),

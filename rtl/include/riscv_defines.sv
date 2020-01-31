@@ -25,6 +25,10 @@
 
 package riscv_defines;
 
+//Status Based Define
+`define STATUS_BASED
+
+  
 ////////////////////////////////////////////////
 //    ___         ____          _             //
 //   / _ \ _ __  / ___|___   __| | ___  ___   //
@@ -173,7 +177,7 @@ parameter ALU_FMAX    = 7'b1000110;
 parameter ALU_FMIN    = 7'b1000111;
 parameter ALU_FCLASS  = 7'b1001000;
 
-
+`ifndef STATUS_BASED
 parameter MUL_MAC32 = 4'b0000;
 parameter MUL_MSU32 = 4'b0001;
 parameter MUL_I     = 4'b0010;
@@ -184,13 +188,83 @@ parameter MUL_H     = 4'b0110;
 parameter MUL_DOT4  = 4'b1000;
 parameter MUL_DOT2  = 4'b1001;
 
+`else // !`ifndef STATUS_BASED
+
+//Added for ivec sb : for new vectorial multiplier formats increas mult_ivec_fmt
+localparam int unsigned NUM_MULT_FORMATS = 5;
+localparam int unsigned NUM_MULT_IVEC = 10;
+localparam int unsigned MUL_TYPES_BITS = $clog2(NUM_MULT_FORMATS + NUM_MULT_IVEC);
+
+typedef enum logic [MUL_TYPES_BITS-1 : 0]
+             {
+              MUL_MAC32,
+              MUL_MSU32,
+              MUL_I,
+              MUL_IR,
+              MUL_H,
+              MUL_DOT16,
+              MUL_DOT8,
+              MUL_DOT4,
+              MUL_DOT2,
+              MIXED_MUL_2x4,
+              MIXED_MUL_2x8,
+              MIXED_MUL_2x16,
+              MIXED_MUL_4x8,
+              MIXED_MUL_4x16,
+              MIXED_MUL_8x16
+             } mult_op_type;
+   
+//Added for ivec sb : if we want to add new ivec formats modify NUM_IVEC_FORMATS
+localparam int unsigned NUM_IVEC_FORMATS = 11;
+localparam int unsigned IVEC_FMT_BITS = $clog2(NUM_IVEC_FORMATS);
+`endif
+  
 // vector modes
+`ifndef STATUS_BASED  
 parameter VEC_MODE32 = 3'b000;
 parameter VEC_MODE16 = 3'b010;
 parameter VEC_MODE8  = 3'b011;
 parameter VEC_MODE4  = 3'b100;
 parameter VEC_MODE2  = 3'b110;
+`else
+typedef enum logic [IVEC_FMT_BITS-1:0]
+{
+ VEC_MODE32,
+ VEC_MODE16,
+ VEC_MODE8,
+ VEC_MODE4,
+ VEC_MODE2,
+ MIXED_2x4,
+ MIXED_2x8,
+ MIXED_2x16,
+ MIXED_4x8,
+ MIXED_4x16,
+ MIXED_8x16
+} ivec_mode_fmt;
+//Added for ivec sb : Defines the maximum number of operations you can do with one register.
+//With 2 bits we reuse the same register for 16 multiplications
+localparam int unsigned MAX_MIXED_MUL = 8;
+localparam int unsigned NBITS_MIXED_CYCLES = $clog2(MAX_MIXED_MUL);   
 
+typedef enum bit [5:0] {
+                        DOTUP   = 6'b10000_0, 
+                        DOTUSP  = 6'b10001_0, 
+                        DOTSP   = 6'b10011_0, 
+                        SDOTUP  = 6'b10100_0, 
+                        SDOTUSP = 6'b10101_0, 
+                        SDOTSP  = 6'b10111_0
+                        } dotp_opcode_t;
+
+typedef enum logic [1:0] {
+                          MPC_CSR,        //Use the Cycles value from CSR 
+                          MPC_CSR_WRITE,  //Use the value that is about to be written into the CSR
+                          MPC_MIX_CNTRL   //Use the last value that the Mixed precision controller wrote
+                          } mux_sel_mpc;
+//Used by mpc to know after how many macs it should start updating cycles
+localparam int unsigned MAX_KER_SIZE = 9; //The size it's 8 but you need 9 elements to encode it 0 to 8.
+localparam int unsigned NBITS_MAX_KER = $clog2(MAX_KER_SIZE);
+`endif // !`ifndef STATUS_BASED
+  
 /////////////////////////////////////////////////////////
 //    ____ ____    ____            _     _             //
 //   / ___/ ___|  |  _ \ ___  __ _(_)___| |_ ___ _ __  //

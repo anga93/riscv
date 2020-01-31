@@ -115,14 +115,20 @@ module riscv_id_stage
     output logic [ 4:0]                    bmask_a_ex_o,
     output logic [ 4:0]                    bmask_b_ex_o,
     output logic [ 1:0]                    imm_vec_ext_ex_o,
+`ifndef STATUS_BASED
     output logic [ 2:0]                    alu_vec_mode_ex_o,
+`else
+    output ivec_mode_fmt                   alu_vec_mode_ex_o, //modified for ivec sb : changed from logic to ivec_mode_fmt
+`endif
 
     output logic [5:0]                     regfile_waddr_ex_o,
     output logic                           regfile_we_ex_o,
 
     output logic [5:0]                     regfile_alu_waddr_ex_o,
     output logic                           regfile_alu_we_ex_o,
-
+`ifdef STATUS_BASED
+    output logic                           ivec_op_ex_o, //Added for ivec sb : needed inside the alu for discrimination between vectorial and scalar operations
+`endif
     // ALU
     output logic                           alu_en_ex_o,
     output logic [ALU_OP_WIDTH-1:0]        alu_operator_ex_o,
@@ -130,9 +136,12 @@ module riscv_id_stage
     output logic                           alu_is_subrot_ex_o,
     output logic [ 1:0]                    alu_clpx_shift_ex_o,
 
-
     // MUL
+`ifndef STATUS_BASED
     output logic [ 3:0]                    mult_operator_ex_o,
+`else
+    output mult_op_type                    mult_operator_ex_o, //Modified for ivec sb : changed from logic to mult_op_type
+`endif	
     output logic [31:0]                    mult_operand_a_ex_o,
     output logic [31:0]                    mult_operand_b_ex_o,
     output logic [31:0]                    mult_operand_c_ex_o,
@@ -179,6 +188,17 @@ module riscv_id_stage
     input logic                            apu_busy_i,
     input logic [C_RM-1:0]                 frm_i,
 
+`ifdef STATUS_BASED
+    input logic [C_FPNEW_FMTBITS-1:0]      csr_fpu_dst_fmt_i, //Aggiunta sb fpu: aggiunto input della id_stage per ricevere il formato delle op fpu dallo status register.
+    input logic [C_FPNEW_FMTBITS-1:0]      csr_fpu_src_fmt_i, //Aggiunta sb fpu: come per il formato di destinazione.
+    input logic [C_FPNEW_IFMTBITS-1:0]     csr_fpu_ifmt_i, //Aggiunta sb fpu: idem per il formato intero.
+    input                                  ivec_mode_fmt csr_ivec_fmt_i, //Added ivec sb : current VEC_MODE coming from cs registers
+    input logic [NBITS_MIXED_CYCLES-1:0]   csr_current_cycle_i, //Added for ivec sb : used by mixed precision controller to know the current mixed cycle
+    input logic [NBITS_MAX_KER-1:0]        csr_skip_size_i, //Added for ivec sb : used by mpc to know after how many macs it can modify next cycle
+
+    output logic [NBITS_MIXED_CYCLES-1:0]  next_cycle_ex_o, //added for ivec sb : used to write next cycle into csr
+    output logic                           mux_sel_wcsr_ex_o, //added for ivec sb : used to override normal csr write signals
+`endif
     // CSR ID/EX
     output logic                           csr_access_ex_o,
     output logic [1:0]                     csr_op_ex_o,
@@ -354,7 +374,11 @@ module riscv_id_stage
   logic [1:0]  jump_target_mux_sel;
 
   // Multiplier Control
+`ifndef STATUS_BASED
   logic [3:0]  mult_operator;    // multiplication operation selection
+`else
+  mult_op_type mult_operator;    // multiplication operation selection //Modified for ivec sb : changed from logic to mult_op_type
+`endif
   logic        mult_en;          // multiplication is used instead of ALU
   logic        mult_int_en;      // use integer multiplier
   logic        mult_sel_subword; // Select a subword when doing multiplications
@@ -368,9 +392,9 @@ module riscv_id_stage
    logic [2:0] qnt_vecmode;      // vecmode for quantization: 4 or 2 bit
 
   // FPU signals
-  logic [C_FPNEW_FMTBITS-1:0]  fpu_src_fmt;
   logic [C_FPNEW_FMTBITS-1:0]  fpu_dst_fmt;
-  logic [C_FPNEW_IFMTBITS-1:0] fpu_int_fmt;
+  logic [C_FPNEW_FMTBITS-1:0]  fpu_src_fmt;
+  logic [C_FPNEW_IFMTBITS-1:0] fpu_ifmt;
 
   // APU signals
   logic                        apu_en;
@@ -416,6 +440,23 @@ module riscv_id_stage
 
   logic                   hwloop_valid;
 
+`ifdef STATUS_BASED  
+  //Added for ivec sb : Now it has 4 bit, 3 for sb fpu and 1 for ivec. 
+  logic [3:0]            write_sb_csr_n;  //aggiunta sb fpu: segnale da dec -> controller DA MODIFICARE: va anche alla pipeline per ora, devo togliere l'igresso del controller
+  logic [3:0]            write_sb_csr_q;  //aggiunta sb fpu: mi serve per fare il fw del formato
+  //per il source
+  logic [C_FPNEW_FMTBITS-1:0] csr_fpu_dst_fmt;   //aggiunta sb fpu: segnale che va all'ingresso del decoder
+  logic [C_FPNEW_FMTBITS-1:0] fpu_dst_fmt_fw;    //aggiunta sb fpu: usato se \E8 necessario fare il fw del valore dello csr che riguarda l fpu_fmt
+  //per destination
+  logic [C_FPNEW_FMTBITS-1:0] csr_fpu_src_fmt;   //aggiunta sb fpu: segnale che va all'ingresso del decoder
+  logic [C_FPNEW_FMTBITS-1:0] fpu_src_fmt_fw;    //aggiunta sb fpu: usato se serve il fw del source fmt
+  //per l'intero
+  logic [C_FPNEW_IFMTBITS-1:0] csr_fpu_ifmt;     //Aggiunta sb fpu: segnale che entra al decoder
+  logic [C_FPNEW_IFMTBITS-1:0] fpu_ifmt_fw;      //Aggiunta sb fpu: usato se serve il fw del formato intero
+   //Added for ivec sb : one of these signals will get to the decoder depending if the last instruction was writing to 0x00D or not
+  ivec_mode_fmt   csr_ivec_fmt;  //Added for ivec sb : If last instruction didn't write to 0x00D this signal will be fed to the decoder
+  ivec_mode_fmt   ivec_fmt_fw;   //Added for ivec sb : If last instruction WAS writing to 0x00D the cs reg it's not yet updated so this will be used by the decoder
+`endif   
   // CSR control
   logic        csr_access;
   logic [1:0]  csr_op;
@@ -451,9 +492,12 @@ module riscv_id_stage
   logic [ 4:0] bmask_b_id;
   logic [ 1:0] imm_vec_ext_id;
   logic [ 4:0] mult_imm_id;
-
+`ifndef STATUS_BASED
   logic [ 2:0] alu_vec_mode;
-
+`else
+  ivec_mode_fmt alu_vec_mode; //modified for ivec sb : changed from logic to ivec_mode_fmt
+  logic         ivec_op;        //Added for ivec sb : this will be connected to the id/ex pipeline
+`endif
   logic        scalar_replication;
   logic        scalar_replication_c;
 
@@ -858,6 +902,24 @@ module riscv_id_stage
       default:   mult_imm_id = '0;
     endcase
   end
+`ifdef STATUS_BASED
+  //Aggiunta sb fpu: vedo se c'\E8 bisogno di usare il fw del destination format oppure no
+   assign fpu_dst_fmt_fw  = alu_operand_a_ex_o[C_FPNEW_FMTBITS-1:0];
+   assign csr_fpu_dst_fmt = write_sb_csr_q[0] ? fpu_dst_fmt_fw : csr_fpu_dst_fmt_i;
+   
+   //Aggiunta sb fpu: vedo se c'\E8 bisogno di usare il fw del source format oppure no
+   assign fpu_src_fmt_fw  = (write_sb_csr_q[1] & write_sb_csr_q[0]) ? alu_operand_a_ex_o[2*C_FPNEW_FMTBITS-1:C_FPNEW_FMTBITS] : alu_operand_a_ex_o[C_FPNEW_FMTBITS-1:0];
+   assign csr_fpu_src_fmt =  write_sb_csr_q[1] ? fpu_src_fmt_fw : csr_fpu_src_fmt_i;
+
+   //Aggiunta sb fpu: vedo se c'\E8 bisogno di usare il fw del fromato intero o no
+   assign fpu_ifmt_fw  = (write_sb_csr_q[2] & (write_sb_csr_q[1] | write_sb_csr_q[0])) ? alu_operand_a_ex_o[C_FPNEW_IFMTBITS+C_FPNEW_FMTBITS-1:C_FPNEW_FMTBITS] : alu_operand_a_ex_o[C_FPNEW_IFMTBITS-1:0];
+   assign csr_fpu_ifmt =  write_sb_csr_q[2] ? fpu_ifmt_fw : csr_fpu_ifmt_i;
+
+   //Added for ivec sb : making sure the instructions that is decoding is using the correct value of VEC_MODE
+   assign ivec_fmt_fw  = ivec_mode_fmt'(alu_operand_a_ex_o[IVEC_FMT_BITS-1:0]);
+   assign csr_ivec_fmt = write_sb_csr_q[3] ? ivec_fmt_fw : csr_ivec_fmt_i;
+
+`endif
 
   /////////////////////////////
   // APU operand assignment  //
@@ -890,7 +952,7 @@ module riscv_id_stage
               apu_flags = '0;
           APU_FLAGS_FPNEW:
             if (FPU == 1)
-              apu_flags = {fpu_int_fmt, fpu_src_fmt, fpu_dst_fmt, fp_rnd_mode};
+              apu_flags = {fpu_ifmt, fpu_src_fmt, fpu_dst_fmt, fp_rnd_mode};
             else
               apu_flags = '0;
           default:
@@ -1121,6 +1183,10 @@ module riscv_id_stage
     .alu_op_b_mux_sel_o              ( alu_op_b_mux_sel          ),
     .alu_op_c_mux_sel_o              ( alu_op_c_mux_sel          ),
     .alu_vec_mode_o                  ( alu_vec_mode              ),
+`ifdef STATUS_BASED
+    .ivec_fmt_i                      ( csr_ivec_fmt              ),
+    .ivec_op_o                       ( ivec_op                   ), //Added for ivec sb : needed to descriminate from vectorial op
+`endif
     .scalar_replication_o            ( scalar_replication        ),
     .scalar_replication_c_o          ( scalar_replication_c      ),
     .imm_a_mux_sel_o                 ( imm_a_mux_sel             ),
@@ -1144,9 +1210,14 @@ module riscv_id_stage
 
     // FPU / APU signals
     .frm_i                           ( frm_i                     ),
+`ifdef STATUS_BASED
+    .fpu_dst_fmt_i                   ( csr_fpu_dst_fmt           ), //Aggiunta sb fpu: Formato delle op fpu derivante dal csr
+    .fpu_src_fmt_i                   ( csr_fpu_src_fmt           ), //Aggiunta sb fpu: formato source potrebbe servire dentro al decoder
+    .fpu_ifmt_i                      ( csr_fpu_ifmt              ), //Aggiunta sb fpu: formato dell'intero potrebbe servire nel decoder
+`endif
     .fpu_src_fmt_o                   ( fpu_src_fmt               ),
     .fpu_dst_fmt_o                   ( fpu_dst_fmt               ),
-    .fpu_int_fmt_o                   ( fpu_int_fmt               ),
+    .fpu_int_fmt_o                   ( fpu_ifmt                  ),
     .apu_en_o                        ( apu_en                    ),
     .apu_type_o                      ( apu_type                  ),
     .apu_op_o                        ( apu_op                    ),
@@ -1161,6 +1232,9 @@ module riscv_id_stage
     .regfile_alu_waddr_sel_o         ( regfile_alu_waddr_mux_sel ),
 
     // CSR control signals
+`ifdef STATUS_BASED
+    .write_sb_csr_o                  ( write_sb_csr_n            ), //aggiunta sb fpu: aggiunto output del decoder : MODIFICA -> PER ORA COMMENTO LO STALLO
+`endif
     .csr_access_o                    ( csr_access                ),
     .csr_status_o                    ( csr_status                ),
     .csr_op_o                        ( csr_op                    ),
@@ -1225,8 +1299,9 @@ module riscv_id_stage
     .mret_dec_i                     ( mret_dec               ),
     .uret_dec_i                     ( uret_dec               ),
     .dret_dec_i                     ( dret_dec               ),
-
-
+`ifdef STATUS_BASED
+    .write_sb_csr_i                 ( write_sb_csr_n         ), //aggiunta sb fpu: connesso l'uscita del decoder per il segnale di write del csr per fpu
+`endif
     .pipe_flush_i                   ( pipe_flush_dec         ),
     .ebrk_insn_i                    ( ebrk_insn              ),
     .fencei_insn_i                  ( fencei_insn_dec        ),
@@ -1435,7 +1510,48 @@ module riscv_id_stage
 
   assign hwloop_valid = instr_valid_i & clear_instr_valid_o & is_hwlp_i;
 
+  ///////////////////////////////////////////////////////////////////////////////////
+  //                   ____ ___  _   _ _____ ____   ___  _     _     _____ ____    //
+  //                  / ___/ _ \| \ | |_   _|  _ \ / _ \| |   | |   | ____|  _ \   //
+  // MIXED_PRECISION-| |  | | | |  \| | | | | |_) | | | | |   | |   |  _| | |_) |  //
+  //                 | |__| |_| | |\  | | | |  _ <| |_| | |___| |___| |___|  _ <   //
+  //                  \____\___/|_| \_| |_| |_| \_\\___/|_____|_____|_____|_| \_\  //
+  //                                                                               //
+  ///////////////////////////////////////////////////////////////////////////////////
 
+   logic [NBITS_MIXED_CYCLES-1:0] current_cycle;
+   logic [NBITS_MIXED_CYCLES-1:0] next_cycle;
+   mux_sel_mpc                    cc_mux_sel_mpc;
+   logic                          mux_sel_wcsr;   
+
+   mixed_precision_controller mpc_i 
+     (
+      .clk             ( clk              ),
+      .rst_n           ( rst_n            ),
+      .illegal_insn_i  ( illegal_insn_dec ),
+      .is_decoding_i   ( is_decoding_o    ),
+      .ivec_fmt_i      ( csr_ivec_fmt     ),
+      .current_cycle_i ( current_cycle    ),      
+      .instr_rdata_i   ( instr_rdata_i    ),
+      .skip_size_i     ( csr_skip_size_i  ),
+      .next_cycle_o    ( next_cycle       ),
+      .mux_sel_wcsr_o  ( mux_sel_wcsr     ),
+      .mux_sel_mpc_o   ( cc_mux_sel_mpc   )                       
+      );
+
+   always_comb begin
+      case(cc_mux_sel_mpc)
+        MPC_CSR :
+          current_cycle = csr_current_cycle_i;
+        MPC_CSR_WRITE :
+          current_cycle = alu_operand_a_ex_o[NBITS_MIXED_CYCLES-1:0];
+        MPC_MIX_CNTRL :
+          current_cycle = next_cycle_ex_o;
+        default :
+          current_cycle = csr_current_cycle_i;        
+      endcase      
+   end // always_comb
+   
   /////////////////////////////////////////////////////////////////////////////////
   //   ___ ____        _______  __  ____ ___ ____  _____ _     ___ _   _ _____   //
   //  |_ _|  _ \      | ____\ \/ / |  _ \_ _|  _ \| ____| |   |_ _| \ | | ____|  //
@@ -1457,12 +1573,20 @@ module riscv_id_stage
       bmask_a_ex_o                <= '0;
       bmask_b_ex_o                <= '0;
       imm_vec_ext_ex_o            <= '0;
+`ifndef STATUS_BASED
       alu_vec_mode_ex_o           <= '0;
+`else
+      alu_vec_mode_ex_o           <= VEC_MODE32;
+      ivec_op_ex_o                <= '0; //Added for ivec sb : this will go to alu for discrimination between vector and scalar op
+`endif
       alu_clpx_shift_ex_o         <= 2'b0;
       alu_is_clpx_ex_o            <= 1'b0;
       alu_is_subrot_ex_o          <= 1'b0;
-
+`ifndef STATUS_BASED
       mult_operator_ex_o          <= '0;
+`else
+      mult_operator_ex_o          <= MUL_MAC32;  //Modified for ivec sb : first was '0 but enum is strongly typed so it needed to be changed to default symbol
+`endif
       mult_operand_a_ex_o         <= '0;
       mult_operand_b_ex_o         <= '0;
       mult_operand_c_ex_o         <= '0;
@@ -1510,6 +1634,13 @@ module riscv_id_stage
 
       csr_access_ex_o             <= 1'b0;
       csr_op_ex_o                 <= CSR_OP_NONE;
+`ifdef STATUS_BASED
+      write_sb_csr_q              <= '0;   //Aggiunta sb fpu : Inizializzazione write_sb_csr_q
+      
+      //added for ivec sb : Mux selector and next cycle for mixed precision ops.
+      mux_sel_wcsr_ex_o           <= 0;       
+      next_cycle_ex_o             <= '0;       
+`endif
 
       data_we_ex_o                <= 1'b0;
       data_type_ex_o              <= 2'b0;
@@ -1566,6 +1697,9 @@ module riscv_id_stage
             bmask_b_ex_o              <= bmask_b_id;
             imm_vec_ext_ex_o          <= imm_vec_ext_id;
             alu_vec_mode_ex_o         <= alu_vec_mode;
+`ifdef STATUS_BASED
+            ivec_op_ex_o              <= ivec_op; //Added for ivec sb : updating pipeline            
+`endif
             alu_is_clpx_ex_o          <= is_clpx;
             alu_clpx_shift_ex_o       <= instr[14:13];
             alu_is_subrot_ex_o        <= is_subrot;
@@ -1583,9 +1717,11 @@ module riscv_id_stage
           mult_imm_ex_o             <= mult_imm_id;
         end
         if (mult_dot_en) begin
+
+          mult_dot_op_c_ex_o        <= alu_operand_c;
           mult_operator_ex_o        <= mult_operator;
           mult_dot_signed_ex_o      <= mult_dot_signed;
-
+`ifndef STATUS_BASED
           case(mult_operator)
             MUL_DOT16: begin
               mult_dot_op_h_a_ex_o        <= alu_operand_a;
@@ -1606,7 +1742,33 @@ module riscv_id_stage
               mult_dot_op_c_b_ex_o        <= alu_operand_b;
             end
           endcase
-          mult_dot_op_c_ex_o        <= alu_operand_c;
+`else
+          case(mult_operator) //added for ivec sb : clock gating for multipliers
+            MUL_DOT16, 
+            MIXED_MUL_8x16, 
+            MIXED_MUL_4x16, 
+            MIXED_MUL_2x16: begin
+              mult_dot_op_h_a_ex_o        <= alu_operand_a;
+              mult_dot_op_h_b_ex_o        <= alu_operand_b;              
+            end
+            MUL_DOT8, 
+            MIXED_MUL_2x8, 
+            MIXED_MUL_4x8: begin
+              mult_dot_op_b_a_ex_o        <= alu_operand_a;
+              mult_dot_op_b_b_ex_o        <= alu_operand_b;
+            end
+            MUL_DOT4,
+            MIXED_MUL_2x4: begin
+              mult_dot_op_n_a_ex_o        <= alu_operand_a;
+              mult_dot_op_n_b_ex_o        <= alu_operand_b;
+            end
+            MUL_DOT2: begin
+              mult_dot_op_c_a_ex_o        <= alu_operand_a;
+              mult_dot_op_c_b_ex_o        <= alu_operand_b;
+            end
+          endcase
+
+`endif
           mult_is_clpx_ex_o         <= is_clpx;
           mult_clpx_shift_ex_o      <= instr[14:13];
           //if (is_clpx) 
@@ -1648,7 +1810,11 @@ module riscv_id_stage
 
         csr_access_ex_o             <= csr_access;
         csr_op_ex_o                 <= csr_op;
-
+`ifdef STATUS_BASED
+        write_sb_csr_q              <= write_sb_csr_n; //Aggiunta sb fpu: aggiorno il registro che mi serve per il forwarding
+        mux_sel_wcsr_ex_o           <= mux_sel_wcsr;   //Added for ivec sb : Used to write the next_cycle in the csr    
+        next_cycle_ex_o             <= next_cycle;     //Added for ivec sb : Value of the next cycle for mixedPrecision
+`endif
         data_req_ex_o               <= data_req_id;
         if (data_req_id)
         begin // only needed for LSU when there is an active request

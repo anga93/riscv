@@ -179,12 +179,21 @@ module riscv_core
   logic [ 4:0] bmask_a_ex;
   logic [ 4:0] bmask_b_ex;
   logic [ 1:0] imm_vec_ext_ex;
+`ifndef STATUS_BASED
   logic [ 2:0] alu_vec_mode_ex;
+`else
+  ivec_mode_fmt alu_vec_mode_ex; //Modified for ivec sb : changed from logic to ivec_mode_fmt
+  logic         ivec_op_ex;      //Added for ivec sb
+`endif
   logic        alu_is_clpx_ex, alu_is_subrot_ex;
   logic [ 1:0] alu_clpx_shift_ex;
 
   // Multiplier Control
+`ifndef STATUS_BASED
   logic [ 3:0] mult_operator_ex;
+`else
+  mult_op_type mult_operator_ex; //Modified for ivec sb : changed from logic to mult_opt_type
+`endif
   logic [31:0] mult_operand_a_ex;
   logic [31:0] mult_operand_b_ex;
   logic [31:0] mult_operand_c_ex;
@@ -258,6 +267,14 @@ module riscv_core
   logic [31:0] regfile_alu_wdata_fw;
 
   // CSR control
+`ifdef STATUS_BASED
+  logic [C_FPNEW_FMTBITS-1:0]  fpu_dst_fmt_csr; //Aggiunta sb fpu: segnale che va da csr -> id_stage : destination del formato
+  logic [C_FPNEW_FMTBITS-1:0]  fpu_src_fmt_csr; //Aggiunta sb fpu: segnale che va da csr -> id_stage : source del formato (casting)
+  logic [C_FPNEW_IFMTBITS-1:0] fpu_ifmt_csr;    //Aggiunta sb fpu: segnale che va da csr -> id_stage : formato intero (casting)
+  ivec_mode_fmt                ivec_fmt_csr;    //Added ivec sb : signal that goes from csr -> id_stage : used to decide the vectorial mode of the istruction
+  logic [NBITS_MIXED_CYCLES-1:0] current_cycle_csr;
+  logic [NBITS_MAX_KER-1:0]     skip_size_csr; //Added for ivec sb : used by mpc to know when to update next cycle
+`endif
   logic        csr_access_ex;
   logic  [1:0] csr_op_ex;
   logic [23:0] mtvec, utvec;
@@ -369,7 +386,10 @@ module riscv_core
   logic [31:0]                      instr_addr_pmp;
   logic                             instr_err_pmp;
 
-
+  // added for ivec sb : Signals to write to csr for mixed precision
+  logic [NBITS_MIXED_CYCLES-1:0]   mpc_next_cycle;
+  logic                            mux_sel_wcsr;      
+  
   //Simchecker signal
   logic is_interrupt;
   assign is_interrupt = (pc_mux_id == PC_EXCEPTION) && (exc_pc_mux_id == EXC_PC_IRQ);
@@ -636,6 +656,9 @@ module riscv_core
     .pc_ex_o                      ( pc_ex                ),
 
     .alu_en_ex_o                  ( alu_en_ex            ),
+`ifdef STATUS_BASED
+    .ivec_op_ex_o                 ( ivec_op_ex           ), //Added for ivec sb
+`endif
     .alu_operator_ex_o            ( alu_operator_ex      ),
     .alu_operand_a_ex_o           ( alu_operand_a_ex     ),
     .alu_operand_b_ex_o           ( alu_operand_b_ex     ),
@@ -702,7 +725,17 @@ module riscv_core
     .apu_write_dep_i              ( apu_write_dep           ),
     .apu_perf_dep_o               ( perf_apu_dep            ),
     .apu_busy_i                   ( apu_busy                ),
-
+`ifdef STATUS_BASED
+    .csr_fpu_dst_fmt_i            ( fpu_dst_fmt_csr      ), //aggiunta sb fpu: id_stage prende in input il fmt della fpu
+    .csr_fpu_src_fmt_i            ( fpu_src_fmt_csr      ), //aggiunta sb fpu: come per il formato di destinazione
+    .csr_fpu_ifmt_i               ( fpu_ifmt_csr         ), //aggiunta sb fpu: idem per il fomato intero
+    
+    .csr_ivec_fmt_i               ( ivec_fmt_csr         ), //added ivec sb : needed inside the decoder to update the VEC_MODE
+    .csr_current_cycle_i          ( current_cycle_csr    ), //added for ivec sb : used by the mixed precision controller to know at what cycle we're currently at
+    .csr_skip_size_i              ( skip_size_csr        ),
+    .next_cycle_ex_o              ( mpc_next_cycle       ), //added for ivec sb : Used to write next cycle into csr
+    .mux_sel_wcsr_ex_o            ( mux_sel_wcsr         ), //added for ivec sb : used to override normal writing signals on csr
+`endif   
     // CSR ID/EX
     .csr_access_ex_o              ( csr_access_ex        ),
     .csr_op_ex_o                  ( csr_op_ex            ),
@@ -821,7 +854,9 @@ module riscv_core
     .alu_is_clpx_i              ( alu_is_clpx_ex               ), // from ID/EX pipe registers
     .alu_is_subrot_i            ( alu_is_subrot_ex             ), // from ID/Ex pipe registers
     .alu_clpx_shift_i           ( alu_clpx_shift_ex            ), // from ID/EX pipe registers
-
+`ifdef STATUS_BASED
+    .ivec_op_i                   ( ivec_op_ex                  ), //Added for ivec sb
+`endif
     // Multipler
     .mult_operator_i            ( mult_operator_ex             ), // from ID/EX pipe registers
     .mult_operand_a_i           ( mult_operand_a_ex            ), // from ID/EX pipe registers
@@ -846,6 +881,9 @@ module riscv_core
     .mult_clpx_img_i            ( mult_clpx_img_ex             ), // from ID/EX pipe registers
 
     .mult_multicycle_o          ( mult_multicycle              ), // to ID/EX pipe registers
+`ifdef STATUS_BASED
+   .current_cycle_i            ( current_cycle_csr            ), // added for ivec sb : Current cycle for mixed preision
+`endif
     .qnt_en_i                   ( qnt_en_ex                    ),
     .qnt_vecmode_i              ( qnt_vecmode_ex               ),
     .qnt_op_a_i                 ( qnt_op_a_ex                  ),
@@ -1027,7 +1065,14 @@ module riscv_core
     .csr_wdata_i             ( csr_wdata          ),
     .csr_op_i                ( csr_op             ),
     .csr_rdata_o             ( csr_rdata          ),
-
+`ifdef STATUS_BASED
+    .fpu_dst_fmt_o           ( fpu_dst_fmt_csr    ),  //Aggiunta sb fpu: Mi serve portarlo in ingresso all'id_stage
+    .fpu_src_fmt_o           ( fpu_src_fmt_csr    ),  //Aggiunta sb fpu: Lo porto in ingresso all'id_stage
+    .fpu_ifmt_o              ( fpu_ifmt_csr       ),  //Aggiunta sb fpu: Sempre all'ingresso dell'id_stage
+    .ivec_fmt_o              ( ivec_fmt_csr       ),  //Added ivec sb : To connect to the id_stage
+    .ivec_mixed_cycle_o      ( current_cycle_csr  ),  //Added for ivec sb : Cycles counter for mixed precion operations
+    .ivec_skip_size_o        ( skip_size_csr      ),  //Added for ivec sb : Used by mpc to know when to increase next_cycle
+`endif
     .frm_o                   ( frm_csr            ),
     .fprec_o                 ( fprec_csr          ),
     .fflags_i                ( fflags_csr         ),
@@ -1103,13 +1148,28 @@ module riscv_core
 
     .ext_counters_i          ( ext_perf_counters_i                    )
   );
-
+`ifndef STATUS_BASED
   //  CSR access
   assign csr_access   =  csr_access_ex;
   assign csr_addr     =  csr_addr_int;
   assign csr_wdata    =  alu_operand_a_ex;
   assign csr_op       =  csr_op_ex;
+`else
+  // Modified for ivec sb : now if a mixed op is being executed we also write into the csr at the same time.
+  always_comb begin
+    csr_access   =  csr_access_ex;
+    csr_addr     =  csr_addr_int;
+    csr_wdata    =  alu_operand_a_ex;
+    csr_op       =  csr_op_ex;
 
+    if(mux_sel_wcsr) begin
+      csr_access   =  1;
+      csr_addr     =  12'h00E;
+      csr_wdata    =  mpc_next_cycle;
+      csr_op       =  2'h1;         
+    end
+  end // always_comb
+`endif
   assign csr_addr_int = csr_access_ex ? alu_operand_b_ex[11:0] : '0;
 
 

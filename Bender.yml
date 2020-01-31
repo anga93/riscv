@@ -34,7 +34,8 @@ sources:
     - rtl/riscv_core.sv
     - rtl/riscv_apu_disp.sv
     - rtl/riscv_fetch_fifo.sv
-    - rtl/riscv_L0_buffer.sv
+    - rtl/riscv_L0_buffer.s
+    - rtl/mixed_precision_controller.sv
     - target: asic
       files:
         - rtl/riscv_register_file_latch.sv

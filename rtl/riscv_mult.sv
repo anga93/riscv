@@ -36,8 +36,11 @@ module riscv_mult
   input  logic        rst_n,
 
   input  logic        enable_i,
+`ifndef
   input  logic [ 3:0] operator_i,
-
+`else
+  input  mult_op_type operator_i,
+`endif
   // integer and short multiplier
   input  logic        short_subword_i,
   input  logic [ 1:0] short_signed_i,
@@ -266,7 +269,7 @@ module riscv_mult
 
         logic [15:0][2:0] dot_crumble_op_a;
         logic [15:0][2:0] dot_crumble_op_b;
-        logic [15:0][3:0] dot_crumble_mul;
+        logic [15:0][5:0] dot_crumble_mul;
 
         logic [1:0][16:0] dot_short_op_a;
         logic [1:0][16:0] dot_short_op_b;
@@ -274,17 +277,66 @@ module riscv_mult
         logic      [16:0] dot_short_op_a_1_neg; //to compute -rA[31:16]*rB[31:16] -> (!rA[31:16] + 1)*rB[31:16] = !rA[31:16]*rB[31:16] + rB[31:16]
         logic      [31:0] dot_short_op_b_ext;
 
-
         assign dot_char_op_a[0] = {dot_signed_i[1] & dot_op_b_a_i[ 7], dot_op_b_a_i[ 7: 0]};
         assign dot_char_op_a[1] = {dot_signed_i[1] & dot_op_b_a_i[15], dot_op_b_a_i[15: 8]};
         assign dot_char_op_a[2] = {dot_signed_i[1] & dot_op_b_a_i[23], dot_op_b_a_i[23:16]};
         assign dot_char_op_a[3] = {dot_signed_i[1] & dot_op_b_a_i[31], dot_op_b_a_i[31:24]};
-
+`ifndef STATUS_BASED
         assign dot_char_op_b[0] = {dot_signed_i[0] & dot_op_b_b_i[ 7], dot_op_b_b_i[ 7: 0]};
         assign dot_char_op_b[1] = {dot_signed_i[0] & dot_op_b_b_i[15], dot_op_b_b_i[15: 8]};
         assign dot_char_op_b[2] = {dot_signed_i[0] & dot_op_b_b_i[23], dot_op_b_b_i[23:16]};
         assign dot_char_op_b[3] = {dot_signed_i[0] & dot_op_b_b_i[31], dot_op_b_b_i[31:24]};
-
+`else
+        always_comb begin
+           dot_char_op_b[0] = {dot_signed_i[0] & dot_op_b_b_i[ 7], dot_op_b_b_i[ 7: 0]};
+           dot_char_op_b[1] = {dot_signed_i[0] & dot_op_b_b_i[15], dot_op_b_b_i[15: 8]};
+           dot_char_op_b[2] = {dot_signed_i[0] & dot_op_b_b_i[23], dot_op_b_b_i[23:16]};
+           dot_char_op_b[3] = {dot_signed_i[0] & dot_op_b_b_i[31], dot_op_b_b_i[31:24]};
+           
+           /************************************************* Formulas for calculating offsets **************************************************************
+            * As operand b in case of mixed precision operations we always use the smaller operand.                                                          *
+            * We need the first and last bit of each multiplier operand, where the first is used to select the current operand and last to extend sign       *
+            * To get the first bit of an operand : (current_cycle * num_ops_per_cycle * operand_size) + (operand_size * operand_index);                      *
+            * To get the last bit of and operand : (current_cycle * num_ops_per_cycle * operand_size + operand_size - 1) + (operand_size * operand_index);   *
+            * Where the part inside the first brace make you move between multiplication cycles while the second let you choose the operand of that cycle.   *
+            * For example the 3rd dot_char_op_b at the second cycle of a 2x8 mixed multiplications will be:                                                  *
+            * Current_cycle = 2                                                                                                                              *
+            * num_ops_per_cycle = 4 (there are 4 8bit multipliers )                                                                                          *
+            * operand_size = 2                                                                                                                               *
+            * operand_index = 2                                                                                                                              *
+            * dot_char_op_b[2] = { dot_signed_i[0] & dotp_op_b_i[(2 * 4 * 2 + 2 - 1) + (2 * 2)], 6'b0, dot_op_b_b_i[(2 * 4 * 2) + (2 * 2) +: 2]}               *
+            * dot_char_op_b[2] = { dot_signed_i[0] & dotp_op_b_i[21], 6'b0, dot_op_b_b_i[21:20]                                                                *
+            *************************************************************************************************************************************************/ 
+           case(operator_i)
+             /*
+              MIXED_2x8: begin
+              for(int i; i<4; i++) 
+              dot_char_op_b[i] = {dot_signed_i[0] & dotp_op_b_i[(current_cycle_i * 4 * 2 + 1) + (i*2)], 6'b0, dot_op_b_b_i[(current_cycle_i * 4 * 2) + (i*2) +: 2]};
+                end
+              MIXED_4x8: begin
+              for(int i; i<4; i++)
+              dot_char_op_b[i] = {dot_signed_i[0] & dotp_op_b_i[(current_cycle_i * 4 * 4 + 3) + (i*4)], 4'b0, dot_op_b_b_i[(current_cycle_i * 4 * 4) + (i*4) +: 4]};
+                end
+              */
+             MIXED_MUL_2x8: begin
+                for(int i=0; i<4; i++)begin
+                   if(dot_signed_i[0])
+                     dot_char_op_b[i] = $signed( dot_op_b_b_i[(current_cycle_i * 4 * 2) + (i*2) +: 2] );
+                   else
+                     dot_char_op_b[i] = { 7'b0,  dot_op_b_b_i[(current_cycle_i * 4 * 2) + (i*2) +: 2] };                      
+                end
+             end
+             MIXED_MUL_4x8: begin
+                for(int i=0; i<4; i++)begin
+                   if(dot_signed_i[0])
+                     dot_char_op_b[i] = $signed( dot_op_b_b_i[(current_cycle_i * 4 * 4) + (i*4) +: 4] );
+                   else
+                     dot_char_op_b[i] = { 5'b0,  dot_op_b_b_i[(current_cycle_i * 4 * 4) + (i*4) +: 4] };
+                end
+             end                
+           endcase // case (operator_i)                            
+        end // always_comb
+`endif
         assign dot_char_mul[0]  = $signed(dot_char_op_a[0]) * $signed(dot_char_op_b[0]);
         assign dot_char_mul[1]  = $signed(dot_char_op_a[1]) * $signed(dot_char_op_b[1]);
         assign dot_char_mul[2]  = $signed(dot_char_op_a[2]) * $signed(dot_char_op_b[2]);
@@ -303,7 +355,7 @@ module riscv_mult
         assign dot_nibble_op_a[5] = {dot_signed_i[1] & dot_op_n_a_i[23], dot_op_n_a_i[23:20]};
         assign dot_nibble_op_a[6] = {dot_signed_i[1] & dot_op_n_a_i[27], dot_op_n_a_i[27:24]};
         assign dot_nibble_op_a[7] = {dot_signed_i[1] & dot_op_n_a_i[31], dot_op_n_a_i[31:28]};
-
+`ifndef STATUS_BASED
         assign dot_nibble_op_b[0] = {dot_signed_i[0] & dot_op_n_b_i[3], dot_op_n_b_i[3:0]};
         assign dot_nibble_op_b[1] = {dot_signed_i[0] & dot_op_n_b_i[7], dot_op_n_b_i[7:4]};
         assign dot_nibble_op_b[2] = {dot_signed_i[0] & dot_op_n_b_i[11], dot_op_n_b_i[11:8]};
@@ -312,7 +364,27 @@ module riscv_mult
         assign dot_nibble_op_b[5] = {dot_signed_i[0] & dot_op_n_b_i[23], dot_op_n_b_i[23:20]};
         assign dot_nibble_op_b[6] = {dot_signed_i[0] & dot_op_n_b_i[27], dot_op_n_b_i[27:24]};
         assign dot_nibble_op_b[7] = {dot_signed_i[0] & dot_op_n_b_i[31], dot_op_n_b_i[31:28]};
+`else
+        always_comb begin          
+           dot_nibble_op_b[0] = {dot_signed_i[0] & dot_op_n_b_i[ 3], dot_op_n_b_i[ 3: 0]};
+           dot_nibble_op_b[1] = {dot_signed_i[0] & dot_op_n_b_i[ 7], dot_op_n_b_i[ 7: 4]};
+           dot_nibble_op_b[2] = {dot_signed_i[0] & dot_op_n_b_i[11], dot_op_n_b_i[11: 8]};
+           dot_nibble_op_b[3] = {dot_signed_i[0] & dot_op_n_b_i[15], dot_op_n_b_i[15:12]};
+           dot_nibble_op_b[4] = {dot_signed_i[0] & dot_op_n_b_i[19], dot_op_n_b_i[19:16]};
+           dot_nibble_op_b[5] = {dot_signed_i[0] & dot_op_n_b_i[23], dot_op_n_b_i[23:20]};
+           dot_nibble_op_b[6] = {dot_signed_i[0] & dot_op_n_b_i[27], dot_op_n_b_i[27:24]};
+           dot_nibble_op_b[7] = {dot_signed_i[0] & dot_op_n_b_i[31], dot_op_n_b_i[31:28]};
 
+           if ( operator_i == MIXED_MUL_2x4 ) begin                              
+              for(int i=0; i<8; i++)begin
+                 if(dot_signed_i[0])
+                   dot_nibble_op_b[i] = $signed( dot_op_n_b_i[(current_cycle_i * 8 * 2) + (i*2) +: 2] );                 
+                 else
+                   dot_nibble_op_b[i] = {  3'b0, dot_op_n_b_i[(current_cycle_i * 8 * 2) + (i*2) +: 2] };
+              end
+           end
+        end // always_comb
+`endif
         assign dot_nibble_mul[0]  = $signed(dot_nibble_op_a[0]) * $signed(dot_nibble_op_b[0]);
         assign dot_nibble_mul[1]  = $signed(dot_nibble_op_a[1]) * $signed(dot_nibble_op_b[1]);
         assign dot_nibble_mul[2]  = $signed(dot_nibble_op_a[2]) * $signed(dot_nibble_op_b[2]);
@@ -393,10 +465,48 @@ module riscv_mult
         assign dot_short_op_a[0]    = {dot_signed_i[1] & dot_op_h_a_i[15], dot_op_h_a_i[15: 0]};
         assign dot_short_op_a[1]    = {dot_signed_i[1] & dot_op_h_a_i[31], dot_op_h_a_i[31:16]};
         assign dot_short_op_a_1_neg = dot_short_op_a[1] ^ {17{(is_clpx_i & ~clpx_img_i)}}; //negates whether clpx_img_i is 0 or 1, only REAL PART needs to be negated
-
+ifndef STATUS_BASED
         assign dot_short_op_b[0] = (is_clpx_i & clpx_img_i) ? {dot_signed_i[0] & dot_op_h_b_i[31], dot_op_h_b_i[31:16]} : {dot_signed_i[0] & dot_op_h_b_i[15], dot_op_h_b_i[15: 0]};
         assign dot_short_op_b[1] = (is_clpx_i & clpx_img_i) ? {dot_signed_i[0] & dot_op_h_b_i[15], dot_op_h_b_i[15: 0]} : {dot_signed_i[0] & dot_op_h_b_i[31], dot_op_h_b_i[31:16]};
+`else
+        always_comb begin
+           dot_short_op_b[0] = clpx_img_i ? {dot_signed_i[0] & dot_op_h_b_i[31], dot_op_h_b_i[31:16]} : {dot_signed_i[0] & dot_op_h_b_i[15], dot_op_h_b_i[15: 0]};
+           dot_short_op_b[1] = clpx_img_i ? {dot_signed_i[0] & dot_op_h_b_i[15], dot_op_h_b_i[15: 0]} : {dot_signed_i[0] & dot_op_h_b_i[31], dot_op_h_b_i[31:16]};
 
+           case(operator_i)
+             MIXED_MUL_2x16 : begin
+                if(dot_signed_i[0]) begin
+                   dot_short_op_b[0] = $signed( dot_op_h_b_i[(current_cycle_i * 2 * 2) +: 2] );                
+                   dot_short_op_b[1] = $signed( dot_op_h_b_i[(current_cycle_i * 2 * 2) + (2) +: 2] );
+                end
+                else begin 
+                   dot_short_op_b[0] = {  14'b0, dot_op_h_b_i[(current_cycle_i * 2 * 2) +: 2] };
+                   dot_short_op_b[1] = {  14'b0, dot_op_h_b_i[(current_cycle_i * 2 * 2) + (2) +: 2] };
+                end                
+             end
+             MIXED_MUL_4x16 : begin
+                if(dot_signed_i[0]) begin
+                   dot_short_op_b[0] = $signed( dot_op_h_b_i[(current_cycle_i * 2 * 4) +: 4] );                
+                   dot_short_op_b[1] = $signed( dot_op_h_b_i[(current_cycle_i * 2 * 4) + (4) +: 4] );
+                end
+                else begin 
+                   dot_short_op_b[0] = {  12'b0, dot_op_h_b_i[(current_cycle_i * 2 * 4) +: 4] };
+                   dot_short_op_b[1] = {  12'b0, dot_op_h_b_i[(current_cycle_i * 2 * 4) + (4) +: 4] };
+                end                
+             end       
+             MIXED_MUL_8x16 : begin
+                if(dot_signed_i[0]) begin
+                   dot_short_op_b[0] = $signed( dot_op_h_b_i[(current_cycle_i * 2 * 8) +: 8] );                
+                   dot_short_op_b[1] = $signed( dot_op_h_b_i[(current_cycle_i * 2 * 8) + (8) +: 8] );
+                end
+                else begin 
+                   dot_short_op_b[0] = {  8'b0, dot_op_h_b_i[(current_cycle_i * 2 * 8) +: 8] };
+                   dot_short_op_b[1] = {  8'b0, dot_op_h_b_i[(current_cycle_i * 2 * 8) + (8) +: 8] };
+                end                
+             end
+           endcase
+        end // always_comb
+`endif
         assign dot_short_mul[0]  = $signed(dot_short_op_a[0]) * $signed(dot_short_op_b[0]);
         assign dot_short_mul[1]  = $signed(dot_short_op_a_1_neg) * $signed(dot_short_op_b[1]);
 
@@ -448,7 +558,14 @@ module riscv_mult
             result_o = dot_short_result[31:0];
         end
       end
-
+`ifdef STATUS_BASED
+      MIXED_MUL_2x4:
+        result_o = dot_nibble_result[31:0];      
+      MIXED_MUL_2x8, MIXED_MUL_4x8:
+        result_o = dot_char_result[31:0];      
+      MIXED_MUL_2x16, MIXED_MUL_4x16, MIXED_MUL_8x16 :
+        result_o = dot_short_result[31:0];
+`endif      
       default: ; // default case to suppress unique warning
     endcase
   end
