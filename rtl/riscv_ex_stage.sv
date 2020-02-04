@@ -149,6 +149,7 @@ module riscv_ex_stage
   input logic                            lsu_en_i,
   input logic [31:0]                     lsu_rdata_i,
   input logic [1:0]                      lsu_tospr_ex_i,
+  input logic                            data_rvalid_ex_i,
 
   // RNN Extension
   output logic                           computeLoadVLIW_ex_o,
@@ -362,7 +363,7 @@ module riscv_ex_stage
   ////////////////////////////////////////////////////////////////
 
 
-  assign mult_dot_op_a = (lsu_tospr_ex_i[0]) ? spr_rnn[lsu_tospr_ex_i[1]] : mult_dot_op_a_i;
+  assign mult_dot_op_a = (lsu_tospr_ex_i[0]) ? spr_rnn[lsu_tospr_ex_i[1]] : mult_dot_op_h_a_i;
 
 
   riscv_mult
@@ -386,7 +387,7 @@ module riscv_ex_stage
     .imm_i           ( mult_imm_i           ),
 
    
-    .dot_op_h_a_i      ( mult_dot_op_h_a_i      ),
+    .dot_op_h_a_i      ( mult_dot_op_a          ),
     .dot_op_h_b_i      ( mult_dot_op_h_b_i      ),
     .dot_op_b_a_i      ( mult_dot_op_b_a_i      ),
     .dot_op_b_b_i      ( mult_dot_op_b_b_i      ),
