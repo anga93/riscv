@@ -30,6 +30,7 @@
 import riscv_defines::*;
 import apu_core_package::*;
 
+`include "riscv_config.sv"
 
 // Source/Destination register instruction index
 `define REG_S1 19:15
@@ -191,7 +192,7 @@ module riscv_id_stage
 `ifdef STATUS_BASED
     input logic [C_FPNEW_FMTBITS-1:0]      csr_fpu_dst_fmt_i, //Aggiunta sb fpu: aggiunto input della id_stage per ricevere il formato delle op fpu dallo status register.
     input logic [C_FPNEW_FMTBITS-1:0]      csr_fpu_src_fmt_i, //Aggiunta sb fpu: come per il formato di destinazione.
-    input logic [C_FPNEW_IFMTBITS-1:0]     csr_fpu_ifmt_i, //Aggiunta sb fpu: idem per il formato intero.
+    input logic [C_FPNEW_IFMTBITS-1:0]     csr_fpu_int_fmt_i, //Aggiunta sb fpu: idem per il formato intero.
     input                                  ivec_mode_fmt csr_ivec_fmt_i, //Added ivec sb : current VEC_MODE coming from cs registers
     input logic [NBITS_MIXED_CYCLES-1:0]   csr_current_cycle_i, //Added for ivec sb : used by mixed precision controller to know the current mixed cycle
     input logic [NBITS_MAX_KER-1:0]        csr_skip_size_i, //Added for ivec sb : used by mpc to know after how many macs it can modify next cycle
@@ -394,7 +395,7 @@ module riscv_id_stage
   // FPU signals
   logic [C_FPNEW_FMTBITS-1:0]  fpu_dst_fmt;
   logic [C_FPNEW_FMTBITS-1:0]  fpu_src_fmt;
-  logic [C_FPNEW_IFMTBITS-1:0] fpu_ifmt;
+  logic [C_FPNEW_IFMTBITS-1:0] fpu_int_fmt;
 
   // APU signals
   logic                        apu_en;
@@ -451,8 +452,8 @@ module riscv_id_stage
   logic [C_FPNEW_FMTBITS-1:0] csr_fpu_src_fmt;   //aggiunta sb fpu: segnale che va all'ingresso del decoder
   logic [C_FPNEW_FMTBITS-1:0] fpu_src_fmt_fw;    //aggiunta sb fpu: usato se serve il fw del source fmt
   //per l'intero
-  logic [C_FPNEW_IFMTBITS-1:0] csr_fpu_ifmt;     //Aggiunta sb fpu: segnale che entra al decoder
-  logic [C_FPNEW_IFMTBITS-1:0] fpu_ifmt_fw;      //Aggiunta sb fpu: usato se serve il fw del formato intero
+  logic [C_FPNEW_IFMTBITS-1:0] csr_fpu_int_fmt;     //Aggiunta sb fpu: segnale che entra al decoder
+  logic [C_FPNEW_IFMTBITS-1:0] fpu_int_fmt_fw;      //Aggiunta sb fpu: usato se serve il fw del formato intero
    //Added for ivec sb : one of these signals will get to the decoder depending if the last instruction was writing to 0x00D or not
   ivec_mode_fmt   csr_ivec_fmt;  //Added for ivec sb : If last instruction didn't write to 0x00D this signal will be fed to the decoder
   ivec_mode_fmt   ivec_fmt_fw;   //Added for ivec sb : If last instruction WAS writing to 0x00D the cs reg it's not yet updated so this will be used by the decoder
@@ -783,13 +784,6 @@ module riscv_id_stage
       imm_shuffle_type = imm_shuffleh_type;
       end
     endcase;
-    // if (alu_vec_mode == VEC_MODE8) begin
-    //   operand_b_vec    = {4{operand_b[7:0]}};
-    //   imm_shuffle_type = imm_shuffleb_type;
-    // end else begin
-    //   operand_b_vec    = {2{operand_b[15:0]}};
-    //   imm_shuffle_type = imm_shuffleh_type;
-    // end
   end
 
   // choose normal or scalar replicated version of operand b
@@ -912,8 +906,8 @@ module riscv_id_stage
    assign csr_fpu_src_fmt =  write_sb_csr_q[1] ? fpu_src_fmt_fw : csr_fpu_src_fmt_i;
 
    //Aggiunta sb fpu: vedo se c'\E8 bisogno di usare il fw del fromato intero o no
-   assign fpu_ifmt_fw  = (write_sb_csr_q[2] & (write_sb_csr_q[1] | write_sb_csr_q[0])) ? alu_operand_a_ex_o[C_FPNEW_IFMTBITS+C_FPNEW_FMTBITS-1:C_FPNEW_FMTBITS] : alu_operand_a_ex_o[C_FPNEW_IFMTBITS-1:0];
-   assign csr_fpu_ifmt =  write_sb_csr_q[2] ? fpu_ifmt_fw : csr_fpu_ifmt_i;
+   assign fpu_int_fmt_fw  = (write_sb_csr_q[2] & (write_sb_csr_q[1] | write_sb_csr_q[0])) ? alu_operand_a_ex_o[C_FPNEW_IFMTBITS+C_FPNEW_FMTBITS-1:C_FPNEW_FMTBITS] : alu_operand_a_ex_o[C_FPNEW_IFMTBITS-1:0];
+   assign csr_fpu_int_fmt =  write_sb_csr_q[2] ? fpu_int_fmt_fw : csr_fpu_int_fmt_i;
 
    //Added for ivec sb : making sure the instructions that is decoding is using the correct value of VEC_MODE
    assign ivec_fmt_fw  = ivec_mode_fmt'(alu_operand_a_ex_o[IVEC_FMT_BITS-1:0]);
@@ -952,7 +946,7 @@ module riscv_id_stage
               apu_flags = '0;
           APU_FLAGS_FPNEW:
             if (FPU == 1)
-              apu_flags = {fpu_ifmt, fpu_src_fmt, fpu_dst_fmt, fp_rnd_mode};
+              apu_flags = {fpu_int_fmt, fpu_src_fmt, fpu_dst_fmt, fp_rnd_mode};
             else
               apu_flags = '0;
           default:
@@ -1213,11 +1207,11 @@ module riscv_id_stage
 `ifdef STATUS_BASED
     .fpu_dst_fmt_i                   ( csr_fpu_dst_fmt           ), //Aggiunta sb fpu: Formato delle op fpu derivante dal csr
     .fpu_src_fmt_i                   ( csr_fpu_src_fmt           ), //Aggiunta sb fpu: formato source potrebbe servire dentro al decoder
-    .fpu_ifmt_i                      ( csr_fpu_ifmt              ), //Aggiunta sb fpu: formato dell'intero potrebbe servire nel decoder
+    .fpu_int_fmt_i                      ( csr_fpu_int_fmt              ), //Aggiunta sb fpu: formato dell'intero potrebbe servire nel decoder
 `endif
     .fpu_src_fmt_o                   ( fpu_src_fmt               ),
     .fpu_dst_fmt_o                   ( fpu_dst_fmt               ),
-    .fpu_int_fmt_o                   ( fpu_ifmt                  ),
+    .fpu_int_fmt_o                   ( fpu_int_fmt                  ),
     .apu_en_o                        ( apu_en                    ),
     .apu_type_o                      ( apu_type                  ),
     .apu_op_o                        ( apu_op                    ),
@@ -1299,9 +1293,6 @@ module riscv_id_stage
     .mret_dec_i                     ( mret_dec               ),
     .uret_dec_i                     ( uret_dec               ),
     .dret_dec_i                     ( dret_dec               ),
-`ifdef STATUS_BASED
-    .write_sb_csr_i                 ( write_sb_csr_n         ), //aggiunta sb fpu: connesso l'uscita del decoder per il segnale di write del csr per fpu
-`endif
     .pipe_flush_i                   ( pipe_flush_dec         ),
     .ebrk_insn_i                    ( ebrk_insn              ),
     .fencei_insn_i                  ( fencei_insn_dec        ),
@@ -1518,7 +1509,7 @@ module riscv_id_stage
   //                  \____\___/|_| \_| |_| |_| \_\\___/|_____|_____|_____|_| \_\  //
   //                                                                               //
   ///////////////////////////////////////////////////////////////////////////////////
-
+`ifdef STATUS_BASED
    logic [NBITS_MIXED_CYCLES-1:0] current_cycle;
    logic [NBITS_MIXED_CYCLES-1:0] next_cycle;
    mux_sel_mpc                    cc_mux_sel_mpc;
@@ -1551,7 +1542,7 @@ module riscv_id_stage
           current_cycle = csr_current_cycle_i;        
       endcase      
    end // always_comb
-   
+`endif   
   /////////////////////////////////////////////////////////////////////////////////
   //   ___ ____        _______  __  ____ ___ ____  _____ _     ___ _   _ _____   //
   //  |_ _|  _ \      | ____\ \/ / |  _ \_ _|  _ \| ____| |   |_ _| \ | | ____|  //

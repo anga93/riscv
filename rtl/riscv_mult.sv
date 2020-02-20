@@ -26,6 +26,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 import riscv_defines::*;
+`include "riscv_config.sv"
 
 module riscv_mult
 #(
@@ -36,7 +37,7 @@ module riscv_mult
   input  logic        rst_n,
 
   input  logic        enable_i,
-`ifndef
+`ifndef STATUS_BASED
   input  logic [ 3:0] operator_i,
 `else
   input  mult_op_type operator_i,
@@ -63,6 +64,9 @@ module riscv_mult
   input  logic [31:0] dot_op_c_a_i,
   input  logic [31:0] dot_op_c_b_i,
   input  logic [31:0] dot_op_c_i,
+`ifdef STATUS_BASED
+  input logic [NBITS_MIXED_CYCLES-1:0] current_cycle_i,
+`endif
   input  logic        is_clpx_i,
   input  logic [ 1:0] clpx_shift_i,
   input  logic        clpx_img_i,
@@ -465,7 +469,7 @@ module riscv_mult
         assign dot_short_op_a[0]    = {dot_signed_i[1] & dot_op_h_a_i[15], dot_op_h_a_i[15: 0]};
         assign dot_short_op_a[1]    = {dot_signed_i[1] & dot_op_h_a_i[31], dot_op_h_a_i[31:16]};
         assign dot_short_op_a_1_neg = dot_short_op_a[1] ^ {17{(is_clpx_i & ~clpx_img_i)}}; //negates whether clpx_img_i is 0 or 1, only REAL PART needs to be negated
-ifndef STATUS_BASED
+`ifndef STATUS_BASED
         assign dot_short_op_b[0] = (is_clpx_i & clpx_img_i) ? {dot_signed_i[0] & dot_op_h_b_i[31], dot_op_h_b_i[31:16]} : {dot_signed_i[0] & dot_op_h_b_i[15], dot_op_h_b_i[15: 0]};
         assign dot_short_op_b[1] = (is_clpx_i & clpx_img_i) ? {dot_signed_i[0] & dot_op_h_b_i[15], dot_op_h_b_i[15: 0]} : {dot_signed_i[0] & dot_op_h_b_i[31], dot_op_h_b_i[31:16]};
 `else

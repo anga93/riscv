@@ -27,6 +27,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 import riscv_defines::*;
+`include "riscv_config.sv"
 
 module riscv_alu
 #(
@@ -354,7 +355,7 @@ module riscv_alu
   begin
     shift_amt_left[31: 0] = shift_amt[31: 0];
 `ifdef STATUS_BASED
-    if (vec_op_i) begin
+    if (ivec_op_i) begin
 `endif
     case(vector_mode_i)
       VEC_MODE16:

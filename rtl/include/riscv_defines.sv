@@ -26,8 +26,8 @@
 package riscv_defines;
 
 //Status Based Define
-`define STATUS_BASED
-
+`include "riscv_config.sv"
+  
   
 ////////////////////////////////////////////////
 //    ___         ____          _             //

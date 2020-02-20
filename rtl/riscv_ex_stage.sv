@@ -33,6 +33,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 `include "apu_macros.sv"
+`include "riscv_config.sv"
 
 import apu_core_package::*;
 import riscv_defines::*;

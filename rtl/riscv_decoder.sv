@@ -26,6 +26,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 `include "apu_macros.sv"
+`include "riscv_config.sv"
 
 import riscv_defines::*;
 
@@ -127,11 +128,11 @@ module riscv_decoder
 `ifdef STATUS_BASED
   input logic [C_FPNEW_FMTBITS-1:0]   fpu_dst_fmt_i, //Aggiunta sb fpu: Ora il formato ce l'ho pure in ingresso
   input logic [C_FPNEW_FMTBITS-1:0]   fpu_src_fmt_i, //Aggiunta sb fpu: stessa cosa del formato di destinazione
-  input logic [C_FPNEW_IFMTBITS-1:0]  fpu_ifmt_i, //Aggiunta sb fpu: stessa cosa del formato di destinazione
+  input logic [C_FPNEW_IFMTBITS-1:0]  fpu_int_fmt_i, //Aggiunta sb fpu: stessa cosa del formato di destinazione
 `endif
   output logic [C_FPNEW_FMTBITS-1:0]  fpu_dst_fmt_o, // fpu destination format
   output logic [C_FPNEW_FMTBITS-1:0]  fpu_src_fmt_o, // fpu source format
-  output logic [C_FPNEW_IFMTBITS-1:0] fpu_ifmt_o, // fpu integer format (for casts)
+  output logic [C_FPNEW_IFMTBITS-1:0] fpu_int_fmt_o, // fpu integer format (for casts)
 
   // APU
   output logic                        apu_en_o,
@@ -149,7 +150,7 @@ module riscv_decoder
 
   // CSR manipulation
 `ifdef STATUS_BASED
-  output logic [3:0]                  write_sb_csr_o, //aggiunta sb fpu: bit 0 -> Scrivo il dst_fmt, bit 1 -> Scrivo il src_fmt, bit 2 -> Scrivo ifmt
+  output logic [3:0]                  write_sb_csr_o, //aggiunta sb fpu: bit 0 -> Scrivo il dst_fmt, bit 1 -> Scrivo il src_fmt, bit 2 -> Scrivo int_fmt
                                                       //Added ivec sb : Also added a fourth bit to discriminate if VEC_MODE cs is being written
 `endif
   output logic                        csr_access_o, // access to CSR
@@ -283,11 +284,11 @@ module riscv_decoder
 `ifndef STATUS_BASED
     fpu_dst_fmt_o               = fpnew_pkg::FP32;
     fpu_src_fmt_o               = fpnew_pkg::FP32;
-    fpu_int_fmt_o               = fpnew_pkg::INT32;
+    fpu_int_fmt_o                  = fpnew_pkg::INT32;
 `else
     fpu_dst_fmt_o               = fpu_dst_fmt_i; //Modifica sb fpu: Lo inizializzo all'ingresso per ora
     fpu_src_fmt_o               = fpu_src_fmt_i; //Aggiunta sb fpu: inizializzo all'ingresso
-    fpu_ifmt_o                  = fpu_ifmt_i;    //Aggiunta sb fpu: inizializzo all'ingresso
+    fpu_int_fmt_o                  = fpu_int_fmt_i;    //Aggiunta sb fpu: inizializzo all'ingresso
 `endif
     check_fprm                  = 1'b0;
     fp_op_group                 = ADDMUL;
@@ -913,12 +914,12 @@ module riscv_decoder
 `ifndef STATUS_BASED
                       unique case (instr_rdata_i[13:12])
                         // FP32
-                        2'b00 : fpu_ifmt_o = fpnew_pkg::INT32;
+                        2'b00 : fpu_int_fmt_o = fpnew_pkg::INT32;
                         // FP16[ALT]
                         2'b01,
-                        2'b10 : fpu_ifmt_o = fpnew_pkg::INT16;
+                        2'b10 : fpu_int_fmt_o = fpnew_pkg::INT16;
                         // FP8
-                        2'b11 : fpu_ifmt_o = fpnew_pkg::INT8;
+                        2'b11 : fpu_int_fmt_o = fpnew_pkg::INT8;
                       endcase
 `endif
                       // Int to FP conversion
@@ -1148,9 +1149,9 @@ module riscv_decoder
                 // DIVSQRT is iterative and takes more than 2 cycles
                 DIVSQRT : apu_lat_o = 2'h3;
                 // NONCOMP uses the same latency for all formats
-                NONCOMP : apu_lat_o = (C_LAT_NONCOMP<2) ? C_LAT_FP32+1 : 2'h3;
+                NONCOMP : apu_lat_o = (C_LAT_NONCOMP<2) ? C_LAT_NONCOMP+1 : 2'h3;
                 // CONV uses the same latency for all formats
-                CONV    : apu_lat_o = (C_LAT_CONV<2) ? C_LAT_FP32+1 : 2'h3;
+                CONV    : apu_lat_o = (C_LAT_CONV<2) ? C_LAT_CONV+1 : 2'h3;
               endcase
 
               // Set FPnew OP and OPMOD as the APU op
@@ -1464,7 +1465,7 @@ module riscv_decoder
                 if (C_XF16ALT) begin  // FP16ALT instructions encoded in rm separately (static)
                   if (!(instr_rdata_i[14:12] inside {[3'b000:3'b010], [3'b100:3'b110]})) begin
                     illegal_insn_o = 1'b1;
-                  end
+                  end                 
                   // FP16ALT uses special encoding here
 `ifndef STATUS_BASED
                   if (instr_rdata_i[14]) begin
@@ -1472,13 +1473,14 @@ module riscv_decoder
                     fpu_src_fmt_o = fpnew_pkg::FP16ALT;
                   end else
 `endif
-		 if (instr_rdata_i[14] == 0)
+		              if (instr_rdata_i[14] == 0)
                     fp_rnd_mode_o = {1'b0, instr_rdata_i[13:12]};
-		else begin
-                  if (!(instr_rdata_i[14:12] inside {[3'b000:3'b010]})) illegal_insn_o = 1'b1;
-                end
-              end
-            end
+		              else begin
+                    if (!(instr_rdata_i[14:12] inside {[3'b000:3'b010]})) illegal_insn_o = 1'b1;
+                  end                  
+                end // if (C_XF16ALT)                
+              end // else: !if(SHARED_FP==1)
+            end // case: 5'b00100            
             // fmin/fmax.fmt - FP Minimum / Maximum
             5'b00101: begin
               // old FPU needs ALU
@@ -1619,14 +1621,14 @@ module riscv_decoder
                     fpu_src_fmt_o = fpnew_pkg::FP16ALT;
                   end else
 `endif
-		  if (instr_rdata[14] == 0)
+		  if (instr_rdata_i[14] == 0)
                     fp_rnd_mode_o = {1'b0, instr_rdata_i[13:12]};                  
                 end else begin
                   if (!(instr_rdata_i[14:12] inside {[3'b000:3'b010]})) illegal_insn_o = 1'b1;
                 end
               end
             end
-            // fcvt.ifmt.fmt - FP to Int Conversion
+            // fcvt.int_fmt.fmt - FP to Int Conversion
             5'b11000: begin
               regb_used_o   = 1'b0;
               reg_fp_d_o    = 1'b0; // go to integer regfile
@@ -1683,7 +1685,7 @@ module riscv_decoder
               // bits [21:20] used, other bits must be 0
               if (instr_rdata_i[24:21]) illegal_insn_o = 1'b1;   // in RV32, no casts to L allowed.
             end
-            // fcvt.fmt.ifmt - Int to FP Conversion
+            // fcvt.fmt.int_fmt - Int to FP Conversion
             5'b11010: begin
               regb_used_o   = 1'b0;
               reg_fp_a_o    = 1'b0; // go from integer regfile
@@ -1847,9 +1849,9 @@ module riscv_decoder
               // DIVSQRT is iterative and takes more than 2 cycles
               DIVSQRT : apu_lat_o = 2'h3;
               // NONCOMP uses the same latency for all formats
-              NONCOMP : apu_lat_o = (C_LAT_NONCOMP<2) ? C_LAT_FP32+1 : 2'h3;
+              NONCOMP : apu_lat_o = (C_LAT_NONCOMP<2) ? C_LAT_NONCOMP+1 : 2'h3;
               // CONV uses the same latency for all formats
-              CONV    : apu_lat_o = (C_LAT_CONV<2) ? C_LAT_FP32+1 : 2'h3;
+              CONV    : apu_lat_o = (C_LAT_CONV<2) ? C_LAT_CONV+1 : 2'h3;
             endcase
           end
 
@@ -2165,7 +2167,9 @@ module riscv_decoder
         regfile_alu_we      = 1'b1;
         rega_used_o         = 1'b1;
         imm_b_mux_sel_o     = IMMB_VS;
-	ivec_op_o	    = 1'b1;
+`ifdef STATUS_BASED
+       	ivec_op_o	    = 1'b1;
+`endif
         // vector size
 `ifndef STATUS_BASED
         unique case( instr_rdata_i[14:12])
@@ -2225,23 +2229,6 @@ module riscv_decoder
           default: illegal_insn_o = 1'b1;
         endcase
 `else
-        if (instr_rdata_i[12]) begin
-          alu_vec_mode_o  = VEC_MODE8;
-          mult_operator_o = MUL_DOT8;
-        end else begin
-          alu_vec_mode_o = VEC_MODE16;
-          mult_operator_o = MUL_DOT16;
-        end
-          ****************************************************************************/
-         /*
-         if (alu_vec_mode_o == VEC_MODE16) begin
-            mult_operator_o = MUL_DOT16;          
-         end
-         else if (alu_vec_mode_o == VEC_MODE8) begin
-            mult_operator_o = MUL_DOT8;
-         end
-          */
-         // Added for ivec sb : mult_operator_o it's correctly in accordance with his VEC_MODE
          case(alu_vec_mode_o)
            VEC_MODE16 :
              mult_operator_o = MUL_DOT16;
@@ -2573,10 +2560,10 @@ module riscv_decoder
           /********************* Aggiunta sb fpu : I vari registri per selezionare i formati ****************************
           * 0x007 : Seleziona solo fpu_dst_fmt                                                                         *
           * 0x008 : Seleziona solo fpu_src_fmt (per fare casting)                                                      *
-          * 0x009 : Seleziona solo fpu_ifmt (per fare casting)                                                         *
+          * 0x009 : Seleziona solo fpu_int_fmt (per fare casting)                                                         *
           * 0x00a : Per fare casting da FP -> FP, permette di scivere il source e destination in una scittura sola     *
-          * 0x00b : Per fare casting da FP -> INT, permette di scrivere in un unica scrittura fpu_dst_fmt e fpu_ifmt   *
-          * 0x00c : Per fare casting da INT -> FP, permette di scrivere in un unica scrittura fpu_src_fmt e fpu_ifmt   *
+          * 0x00b : Per fare casting da FP -> INT, permette di scrivere in un unica scrittura fpu_dst_fmt e fpu_int_fmt   *
+          * 0x00c : Per fare casting da INT -> FP, permette di scrivere in un unica scrittura fpu_src_fmt e fpu_int_fmt   *
           * 0x00d : IVEC csr address
           **************************************************************************************************************/
           if (csr_sb_fpu_addr inside {[7:13]} && instr_rdata_i[13:12]==2'b01)  // Modified for ivec sb : Now it goes to 13 instead of 12, 0x00D = 13

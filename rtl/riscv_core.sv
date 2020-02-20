@@ -43,9 +43,9 @@ module riscv_core
   parameter N_PMP_ENTRIES       = 16,
   parameter USE_PMP             =  1, //if PULP_SECURE is 1, you can still not use the PMP
   parameter USE_QNT             =  0,
-  parameter PULP_CLUSTER        =  1,
+  parameter PULP_CLUSTER        =  0,
   parameter FPU                 =  0,
-  parameter Zfinx               =  0,
+  parameter Zfinx               =  1,
   parameter FP_DIVSQRT          =  0,
   parameter SHARED_FP           =  0,
   parameter SHARED_DSP_MULT     =  0,
@@ -270,7 +270,7 @@ module riscv_core
 `ifdef STATUS_BASED
   logic [C_FPNEW_FMTBITS-1:0]  fpu_dst_fmt_csr; //Aggiunta sb fpu: segnale che va da csr -> id_stage : destination del formato
   logic [C_FPNEW_FMTBITS-1:0]  fpu_src_fmt_csr; //Aggiunta sb fpu: segnale che va da csr -> id_stage : source del formato (casting)
-  logic [C_FPNEW_IFMTBITS-1:0] fpu_ifmt_csr;    //Aggiunta sb fpu: segnale che va da csr -> id_stage : formato intero (casting)
+  logic [C_FPNEW_IFMTBITS-1:0] fpu_int_fmt_csr;    //Aggiunta sb fpu: segnale che va da csr -> id_stage : formato intero (casting)
   ivec_mode_fmt                ivec_fmt_csr;    //Added ivec sb : signal that goes from csr -> id_stage : used to decide the vectorial mode of the istruction
   logic [NBITS_MIXED_CYCLES-1:0] current_cycle_csr;
   logic [NBITS_MAX_KER-1:0]     skip_size_csr; //Added for ivec sb : used by mpc to know when to update next cycle
@@ -386,10 +386,11 @@ module riscv_core
   logic [31:0]                      instr_addr_pmp;
   logic                             instr_err_pmp;
 
+`ifdef STATUS_BASED
   // added for ivec sb : Signals to write to csr for mixed precision
   logic [NBITS_MIXED_CYCLES-1:0]   mpc_next_cycle;
   logic                            mux_sel_wcsr;      
-  
+`endif
   //Simchecker signal
   logic is_interrupt;
   assign is_interrupt = (pc_mux_id == PC_EXCEPTION) && (exc_pc_mux_id == EXC_PC_IRQ);
@@ -728,7 +729,7 @@ module riscv_core
 `ifdef STATUS_BASED
     .csr_fpu_dst_fmt_i            ( fpu_dst_fmt_csr      ), //aggiunta sb fpu: id_stage prende in input il fmt della fpu
     .csr_fpu_src_fmt_i            ( fpu_src_fmt_csr      ), //aggiunta sb fpu: come per il formato di destinazione
-    .csr_fpu_ifmt_i               ( fpu_ifmt_csr         ), //aggiunta sb fpu: idem per il fomato intero
+    .csr_fpu_int_fmt_i               ( fpu_int_fmt_csr         ), //aggiunta sb fpu: idem per il fomato intero
     
     .csr_ivec_fmt_i               ( ivec_fmt_csr         ), //added ivec sb : needed inside the decoder to update the VEC_MODE
     .csr_current_cycle_i          ( current_cycle_csr    ), //added for ivec sb : used by the mixed precision controller to know at what cycle we're currently at
@@ -1068,7 +1069,7 @@ module riscv_core
 `ifdef STATUS_BASED
     .fpu_dst_fmt_o           ( fpu_dst_fmt_csr    ),  //Aggiunta sb fpu: Mi serve portarlo in ingresso all'id_stage
     .fpu_src_fmt_o           ( fpu_src_fmt_csr    ),  //Aggiunta sb fpu: Lo porto in ingresso all'id_stage
-    .fpu_ifmt_o              ( fpu_ifmt_csr       ),  //Aggiunta sb fpu: Sempre all'ingresso dell'id_stage
+    .fpu_int_fmt_o              ( fpu_int_fmt_csr       ),  //Aggiunta sb fpu: Sempre all'ingresso dell'id_stage
     .ivec_fmt_o              ( ivec_fmt_csr       ),  //Added ivec sb : To connect to the id_stage
     .ivec_mixed_cycle_o      ( current_cycle_csr  ),  //Added for ivec sb : Cycles counter for mixed precion operations
     .ivec_skip_size_o        ( skip_size_csr      ),  //Added for ivec sb : Used by mpc to know when to increase next_cycle
